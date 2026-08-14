@@ -27,3 +27,8 @@ Mi nivel: sé PHP, SQL y desarrollo móvil. Next.js y TypeScript los estoy apren
 - `npm run dev` — servidor local
 - `npm run build` — verificar que compila antes de hacer commit
 - `npm run lint` — revisar errores de estilo
+
+## Plan de trabajo
+Antes de empezar cualquier tarea, lee docs/PLAN.md.
+Al terminar una tarea, marca su checkbox en ese archivo.
+Registra decisiones técnicas importantes en docs/DECISIONES.md, con la razón.
