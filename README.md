@@ -1,36 +1,49 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Barbería El Roble — Sitio web y sistema de citas
 
-## Getting Started
+Sitio web para barberías y negocios locales que hoy agendan por WhatsApp
+o libreta, y pierden citas por no tener dónde reservar.
 
-First, run the development server:
+**Demo:** https://barberia-citas-one.vercel.app/
+
+![Landing](docs/img/landing.png)
+![Servicios](docs/img/servicios.png)
+
+## El problema
+
+Un negocio local sin presencia web depende de que lo encuentren en la calle.
+Sin agenda digital, el dueño atiende el teléfono mientras corta el cabello,
+y las citas se anotan en papel.
+
+## Solución
+
+- Presencia web propia, rápida y adaptada a móvil
+- Catálogo de servicios con precios visibles
+- Reserva de citas en línea (en desarrollo)
+- Panel para que el dueño administre su agenda (en desarrollo)
+
+## Stack
+
+- Next.js (App Router) + TypeScript
+- Tailwind CSS
+- Supabase — Postgres + Auth (en desarrollo)
+- Desplegado en Vercel
+
+## Correr en local
 
 ```bash
+git clone https://github.com/DiegoE6/barberia-citas.git
+cd barberia-citas
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Abrir http://localhost:3000
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Estado del proyecto
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- [x] Fase 1 — Landing pública
+- [ ] Fase 2 — Base de datos
+- [ ] Fase 3 — Reserva de citas
+- [ ] Fase 4 — Panel de administración
 
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Ver [docs/PLAN.md](docs/PLAN.md) para el detalle.
