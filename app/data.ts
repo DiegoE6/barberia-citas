@@ -6,14 +6,6 @@ export const siteConfig = {
   whatsappMessage: "Hola, quiero agendar una cita",
 };
 
-export const services = [
-  { name: "Corte clásico", price: 150 },
-  { name: "Corte + barba", price: 220 },
-  { name: "Afeitado tradicional", price: 130 },
-  { name: "Diseño de barba", price: 100 },
-  { name: "Corte niño", price: 120 },
-];
-
 export const schedule = [
   { day: "Lunes", hours: "10:00 - 20:00" },
   { day: "Martes", hours: "10:00 - 20:00" },
