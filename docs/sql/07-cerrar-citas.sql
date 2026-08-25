@@ -1,0 +1,45 @@
+-- ┌──────────────────────────────────────────────────────────────────────┐
+-- │  NO CORRER TODAVÍA.                                                  │
+-- │                                                                      │
+-- │  Este script quita la única vía que existe hoy para crear citas.     │
+-- │  Correrlo antes de que el Server Action funcione deja el sistema     │
+-- │  sin ninguna forma de agendar.                                       │
+-- │                                                                      │
+-- │  Correr cuando:                                                      │
+-- │    1. app/lib/supabase-admin.ts exista y funcione,                   │
+-- │    2. SUPABASE_SERVICE_ROLE_KEY esté en .env.local Y en Vercel,      │
+-- │    3. el Server Action haya insertado una cita de prueba con éxito.  │
+-- └──────────────────────────────────────────────────────────────────────┘
+--
+-- Contexto: se eligió la Opción A (insert desde un Server Action con la
+-- service_role key). Ver docs/DECISIONES.md.
+--
+-- La política `for insert to anon` se creó en 06-crear-citas.sql para que el
+-- formulario insertara directo desde el navegador. Con la Opción A ese insert
+-- pasa a hacerse en el servidor, y la service_role key ignora RLS por completo,
+-- así que esta política deja de usarse.
+--
+-- Pero "deja de usarse" no es "deja de existir": mientras siga ahí, cualquiera
+-- con la anon key —que viaja en el bundle del navegador, es pública por
+-- diseño— puede seguir creando citas sin pasar por la app, sin límite y
+-- saltándose las validaciones del Server Action. Quitarla es lo que hace que
+-- la Opción A sirva de algo.
+
+drop policy "Cualquiera puede crear una cita" on citas;
+
+-- Estado final de `citas`: RLS activo y CERO políticas.
+--
+-- Con RLS habilitado y ninguna política, la tabla queda cerrada para `anon` y
+-- `authenticated`. Solo la service_role key puede tocarla, porque ignora RLS.
+--
+-- Esto es a propósito, y tiene una propiedad valiosa: si alguien se equivoca
+-- y usa el cliente público en lugar del cliente admin, la operación **falla
+-- cerrada** (es rechazada) en vez de filtrar datos de clientes.
+--
+-- En la Fase 4, cuando entre Supabase Auth, aquí se agregan las políticas de
+-- select/update para el rol `authenticated`, para que el dueño lea su agenda
+-- y confirme o cancele citas.
+
+-- Comprobación: debe devolver cero filas.
+--
+--   select policyname from pg_policies where tablename = 'citas';

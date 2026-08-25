@@ -175,6 +175,8 @@ que pasar a ser por barbero (`barbero_id WITH =` más el rango), y
 
 ### Pendiente para la Fase 3
 
+*Resuelto el 2026-08-25; ver la entrada siguiente.*
+
 El `with check` de la política de insert solo alcanza a validar
 `estado` e `inicio`. No puede verificar que `fin` corresponda a la
 duración real del servicio ni que `precio_cobrado` sea el precio real:
@@ -197,3 +199,202 @@ del modelo de acceso de la Fase 3.
 - Índice en `inicio`, esta vez sí. Al contrario de `horarios_semana`, que
   tiene 8 filas para siempre, `citas` crece sin techo, y tanto la agenda
   como la disponibilidad filtran por rango de fechas.
+
+## Acceso a citas: Server Action con service_role (2026-08-25)
+
+**Contexto**: resuelve el pendiente que dejó la entrada anterior. Había
+que decidir cómo se insertan las citas y cómo se lee la disponibilidad,
+sabiendo que la política `for insert to anon` de `06-crear-citas.sql`
+dejaba dos huecos: el cliente controlaba `fin` y `precio_cobrado`, y
+cualquiera con la anon key podía crear citas sin límite.
+
+El punto de partida es que **la anon key es pública por diseño**: viaja
+en el bundle del navegador. Cualquier permiso concedido al rol `anon`
+está concedido a todo internet.
+
+**Opciones consideradas**:
+
+- **Insert desde el navegador con un trigger.** El trigger `before insert`
+  recalcularía `fin` y `precio_cobrado` desde `servicio_id`, pisando lo
+  que mande el cliente. Ventaja real: la garantía vale para cualquier
+  origen del insert, incluido el Table Editor o una app móvil futura, y
+  no hace falta la service_role key en ningún lado. Descartada por el
+  spam: el endpoint de escritura sería la API pública de Supabase, y no
+  hay dónde interponer un límite propio. Alguien puede llenar la agenda
+  con citas falsas en segundos. Además, la disponibilidad exigiría
+  construir una vista o un RPC.
+- **Server Action con la service_role key** — elegida.
+
+**Decisión**: el formulario público llama a un Server Action. Ese código
+corre solo en el servidor, busca el servicio en la BD, calcula él mismo
+`fin` y `precio_cobrado`, valida, e inserta con `supabaseAdmin`
+(`app/lib/supabase-admin.ts`), que usa la service_role key e ignora RLS.
+La disponibilidad se calcula igual, en el servidor: al navegador solo
+bajan las horas libres, nunca datos de clientes. No hace falta ni vista
+ni RPC.
+
+Razones, por peso:
+1. **El spam decide.** Es la única de las dos que deja un lugar propio
+   donde poner el freno (límite por teléfono, campo trampa, captcha).
+2. Cierra el hueco de `fin`/`precio` sin maquinaria nueva: el cliente
+   sencillamente ya no manda esos valores.
+3. La disponibilidad no necesita objetos nuevos en la base de datos.
+4. La lógica de negocio queda en un solo lenguaje y un solo lugar.
+
+**Lo que se cede**: RLS deja de ser el guardia de `citas`; el guardia
+pasa a ser la disciplina de no usar el cliente admin donde no va. Lo
+hace manejable que Next.js solo mete en el bundle del navegador las
+variables con prefijo `NEXT_PUBLIC_`, así que la llave no existe del lado
+del cliente: importar `supabase-admin.ts` por error da un cliente roto,
+no una llave filtrada. El módulo además tiene un guard que lanza un error
+si se carga en el navegador.
+
+**`07-cerrar-citas.sql` es parte de la decisión, no un extra.** Quita la
+política de insert de `anon`. Mientras esa política exista, la puerta
+vieja sigue abierta y la Opción A no protege nada. Se corre **después**
+de que el Server Action funcione, para no quedarse sin ninguna vía de
+insert mientras tanto. Estado final de la tabla: RLS activo y cero
+políticas, de modo que un uso equivocado del cliente público **falla
+cerrado** en vez de filtrar datos.
+
+**Lo que esta decisión NO resuelve**:
+- La verificación CSRF que trae Next (compara `Origin` contra `Host`) no
+  es rate limiting: no detiene un `curl` con el `Origin` correcto. El
+  freno hay que escribirlo; esta decisión solo da el lugar.
+- Un Server Action **es un endpoint público** con sintaxis de función.
+  Los docs de Next lo dicen explícitamente: hay que tratar sus entradas
+  como no confiables. Validar siempre.
+- La restricción `EXCLUDE` de la BD sigue siendo la que garantiza que no
+  se empalmen las citas. El Server Action puede tener bugs; el constraint
+  no.
+- Un límite por teléfono es débil porque los teléfonos se inventan. El
+  freno serio (verificación por SMS) tiene costo y queda fuera de alcance.
+
+## Zona horaria: la conversión vive en Postgres (2026-08-25)
+
+**Contexto**: `horarios_semana` guarda reloj local (`time`) y `citas`
+guarda instantes (`timestamptz`). El cálculo de slots tiene que cruzar
+las dos, así que hay que convertir. Y de las dos direcciones posibles,
+la que hace falta es la difícil.
+
+| Dirección | Dificultad |
+|---|---|
+| Instante → reloj local | Fácil. `Intl` lo hace nativo. |
+| **Reloj local → instante** | **Difícil.** JavaScript no trae nada nativo. |
+
+**Verificado en el entorno de desarrollo (Node v22.17.1)**:
+- `Temporal`, la API nueva que resolvería esto limpiamente, **no existe
+  todavía** en Node 22. Descartada por disponibilidad, no por criterio.
+- `new Date('2026-08-30').getDay()` devuelve **6** (sábado) cuando el 30
+  de agosto de 2026 es **domingo**. La trampa que se había anotado como
+  riesgo teórico está confirmada en la máquina real: el string ISO se
+  interpreta como medianoche UTC y en México se corre un día. Un cliente
+  que pidiera cita en domingo vería los horarios del sábado.
+
+**Opciones consideradas**:
+- `date-fns` + `date-fns-tz`, `Luxon`, o `dayjs` con plugins — resuelven
+  la dirección difícil, pero agregan dependencias para hacer algo que
+  Postgres ya hace de forma nativa. Descartadas.
+- Un helper propio en TypeScript que sondee el offset con `Intl` — viable
+  y sin dependencias, pero son ~15 líneas delicadas escritas a mano.
+  Descartada frente a un operador nativo de la BD.
+- **Función `bloques_del_dia(fecha, zona)` en Postgres** — elegida.
+
+**Decisión**: la conversión ocurre en `docs/sql/08-bloques-del-dia.sql`,
+con el operador `at time zone`, que usa la base de datos IANA completa. La
+función devuelve los bloques de una fecha ya como `timestamptz`. Del lado
+de TypeScript (`app/lib/disponibilidad.ts`) todo el cálculo queda como
+aritmética sobre milisegundos, **donde las zonas horarias no existen y no
+hay nada que equivocar**. La única conversión en JavaScript es instante →
+texto para mostrar, que es la dirección fácil y la cubre `Intl`.
+
+El día de la semana también sale de Postgres, con
+`extract(dow from fecha)` sobre un `date` —que no tiene zona, así que no
+hay ambigüedad posible—. Eso esquiva la trampa de `getDay()` por
+completo, en vez de intentar sortearla.
+
+### Por qué no se hardcodea el offset -06:00 (decisión de producto)
+
+Se verificó que Monterrey tiene offset `GMT-06:00` tanto en enero como en
+julio de 2026: **México abolió el horario de verano en 2022**. Eso hace
+muy tentador hardcodear `-06:00` y ahorrarse toda esta pieza, porque hoy
+funcionaría perfecto.
+
+No se hizo, y la razón no es técnica sino de producto: **Baja California
+sí observa horario de verano.** Los municipios de la frontera quedaron
+exentos de la abolición. El día que este sistema se le venda a una
+barbería en Tijuana o Mexicali, un offset fijo agendaría todas las citas
+con una hora de diferencia durante medio año — y sería un bug carísimo de
+encontrar, porque los otros seis meses funciona bien.
+
+Por eso la zona es un **parámetro** de `bloques_del_dia`, con
+`'America/Monterrey'` solo como valor por omisión. Cuando haya varios
+negocios, la zona pasa a ser un dato de configuración de cada uno y la
+función ya la acepta sin cambios.
+
+**Que Monterrey no tenga horario de verano es una simplificación
+agradable, no un cimiento.** El diseño no depende de ella.
+
+### Constantes elegidas
+
+- **Paso entre horarios: 30 minutos.** Con 15 la agenda se compacta más,
+  pero se le presentan al cliente el doble de opciones.
+- **Anticipación mínima: 30 minutos.** Que nadie agende para dentro de
+  cinco minutos.
+
+Las dos viven como constantes con nombre en `app/lib/disponibilidad.ts`,
+no en la base de datos: no son datos por día, son política del negocio, y
+cambiarlas es editar una línea.
+
+### Distinguir "cerrado" de "error"
+
+`getDisponibilidad` devuelve un estado de tres valores (`ok`, `cerrado`,
+`error`) en vez de simplemente una lista vacía. Si una consulta falla y
+lo reportáramos como "cerrado", le estaríamos diciendo al cliente que la
+barbería no abre ese día. Es el mismo cuidado que ya se había tomado en
+`Schedule.tsx` para no pintar los siete días como "Cerrado" ante un error
+de red.
+
+## Flujo de reserva en tres pasos, sin JavaScript de cliente (2026-08-25)
+
+**Contexto**: al verificar el Paso A se detectó un problema real de la
+página de una sola pantalla: si el usuario cambia el desplegable de
+servicio sin volver a enviar el formulario, los horarios de abajo siguen
+siendo de la consulta anterior. En una página de verificación da igual,
+pero en el formulario real **alguien podría reservar creyendo que pidió
+otro servicio**.
+
+**Opciones consideradas**:
+- **Auto-enviar el formulario al cambiar el select.** Es el arreglo de UX
+  más directo, pero obliga a convertir la página en Client Component
+  (`"use client"`) solo para eso. Descartada: introduce JavaScript de
+  cliente en un flujo que hasta ahora no lo necesita.
+- **Campos ocultos con los valores de la URL**, dejando todo en una
+  pantalla. Elimina el peligro (lo que se envía es lo que se calculó),
+  pero no el desconcierto: el desplegable seguiría mostrando una cosa y
+  la lista otra. Insuficiente por sí sola.
+- **Flujo en tres pasos** — elegida.
+
+**Decisión**: `/agendar` (elegir servicio y fecha, ver horarios) →
+`/agendar/confirmar` (resumen y datos de contacto) → `/agendar/listo`.
+
+Cada horario es un enlace que lleva el servicio y la fecha **de la URL**,
+no del desplegable, así que el desajuste no puede llegar a la reserva. Y
+la pantalla de confirmación muestra servicio, fecha, hora y precio
+tomados de la URL, sin ningún control editable a la vista: el cliente ve
+exactamente lo que va a agendar antes de dar sus datos.
+
+Ventajas adicionales: es el patrón POST/Redirect/GET de toda la vida, así
+que recargar la pantalla final no crea una segunda cita; y revalidar la
+disponibilidad al entrar a `confirmar` evita que alguien escriba su
+nombre y teléfono en un horario que ya se ocupó.
+
+**Todo el flujo es HTML plano**: formularios `method="get"`, un
+`<form action={serverAction}>`, y los errores viajan como `?error=` en la
+URL en vez de por `useActionState`. Cero `"use client"` en el proyecto.
+
+**Nota de privacidad**: los errores se devuelven por redirect, y en esas
+URLs van solo servicio, fecha y hora. El nombre y el teléfono **nunca**
+se ponen en un query string, porque quedarían en el historial del
+navegador y en los logs del servidor. El costo es que ante un error el
+cliente los reescribe; el `required` del HTML hace que sea raro.
