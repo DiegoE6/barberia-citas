@@ -5,11 +5,41 @@ o libreta, y pierden citas por no tener dónde reservar.
 
 **Demo:** https://barberia-citas-one.vercel.app/
 
-![Landing](docs/img/landing.png)
-![Servicios](docs/img/servicios.png)
-![Seleccionar](docs/img/seleccionar.png)
-![Datos](docs/img/datos.png)
-![Confirmacion](docs/img/confirmacion.png)
+## El sitio
+
+![Landing de Barbería El Roble](docs/img/landing.png)
+
+Los servicios y precios se leen desde la base de datos, así que el dueño
+los edita sin tocar código.
+
+![Servicios con precios](docs/img/servicios.png)
+
+---
+
+## Cómo se agenda una cita
+
+**1 · Elegir servicio y ver horarios reales**
+
+Solo aparecen las horas realmente libres: se descartan las ocupadas, las
+que ya pasaron, y las que no alcanzan a cubrir la duración del servicio
+antes del cierre.
+
+![Selección de horario](docs/img/seleccionar.png)
+
+**2 · Confirmar antes de dar los datos**
+
+El cliente ve exactamente qué está reservando —servicio, fecha, hora y
+precio— antes de escribir su nombre.
+
+![Datos del cliente](docs/img/datos.png)
+
+**3 · Cita agendada**
+
+La cita queda guardada con protección contra empalmes a nivel de base de
+datos: dos personas no pueden reservar el mismo horario, ni aunque lo
+intenten en el mismo instante.
+
+![Confirmación de la cita](docs/img/confirmacion.png)
 
 ## El problema
 
