@@ -1,24 +1,30 @@
+import Link from "next/link";
 import { supabase } from "@/app/lib/supabase";
 import {
   getDisponibilidad,
   fechaDeHoy,
+  formatFechaLarga,
   SLOT_STEP_MINUTES,
   MIN_LEAD_MINUTES,
 } from "@/app/lib/disponibilidad";
 
-// Página de verificación del Paso A: elegir servicio y fecha, y ver los
-// horarios libres. Todavía no agenda nada — el formulario y el Server Action
-// son el Paso B.
+// Paso 1 del flujo: elegir servicio y fecha, y ver los horarios libres.
 //
 // Es un Server Component y el formulario es un <form method="get"> normal:
-// al enviarlo, el navegador recarga la página con ?servicio=&fecha= en la URL
-// y el servidor vuelve a calcular. Cero JavaScript de cliente.
+// al enviarlo, el navegador recarga con ?servicio=&fecha= en la URL y el
+// servidor recalcula. Cero JavaScript de cliente en todo el flujo.
+
+const MENSAJES_ERROR: Record<string, string> = {
+  ocupado: "Ese horario acaba de ocuparse. Elige otro.",
+  servicio: "Ese servicio ya no está disponible.",
+  desconocido: "No pudimos completar la reserva. Intenta de nuevo.",
+};
 
 export default async function AgendarPage({
   searchParams,
 }: {
   // En Next 16 searchParams es una Promise: hay que await-earla.
-  searchParams: Promise<{ servicio?: string; fecha?: string }>;
+  searchParams: Promise<{ servicio?: string; fecha?: string; error?: string }>;
 }) {
   const params = await searchParams;
 
@@ -36,12 +42,20 @@ export default async function AgendarPage({
     ? await getDisponibilidad(fecha, servicio.duracion_minutos)
     : null;
 
+  const mensajeError = params.error ? MENSAJES_ERROR[params.error] : null;
+
   return (
     <section className="bg-white px-6 py-20 text-zinc-900">
       <div className="mx-auto max-w-3xl">
         <h1 className="text-center text-3xl font-bold tracking-tight">
           Agendar cita
         </h1>
+
+        {mensajeError && (
+          <p className="mt-6 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-center text-amber-900">
+            {mensajeError}
+          </p>
+        )}
 
         <form
           method="get"
@@ -87,34 +101,49 @@ export default async function AgendarPage({
             <p className="text-center text-zinc-500">
               Elige un servicio y una fecha para ver los horarios disponibles.
             </p>
-          ) : disponibilidad?.estado === "error" ? (
-            <p className="text-center text-zinc-500">
-              No pudimos consultar la disponibilidad. Intenta de nuevo.
-            </p>
-          ) : disponibilidad?.estado === "cerrado" ? (
-            <p className="text-center text-zinc-500">
-              La barbería no abre ese día.
-            </p>
-          ) : disponibilidad?.slots.length === 0 ? (
-            <p className="text-center text-zinc-500">
-              No quedan horarios libres para esa fecha.
-            </p>
           ) : (
             <>
-              <p className="text-sm text-zinc-500">
-                {disponibilidad?.slots.length} horarios disponibles para{" "}
-                {servicio.nombre} ({servicio.duracion_minutos} min)
+              {/* Este encabezado dice exactamente de qué son los horarios de
+                  abajo. Si alguien cambia el desplegable sin volver a enviar,
+                  el desajuste queda a la vista, y los enlaces de cada horario
+                  llevan el servicio de la URL, no el del desplegable. */}
+              <h2 className="text-lg font-semibold">
+                Horarios libres para {servicio.nombre}
+                <span className="font-normal text-zinc-500">
+                  {" "}
+                  ({servicio.duracion_minutos} min)
+                </span>
+              </h2>
+              <p className="mt-1 text-sm text-zinc-500">
+                {formatFechaLarga(fecha)}
               </p>
-              <ul className="mt-4 flex flex-wrap gap-2">
-                {disponibilidad?.slots.map((slot) => (
-                  <li
-                    key={slot.inicio.toISOString()}
-                    className="rounded-md border border-zinc-300 px-4 py-2 text-lg"
-                  >
-                    {slot.hora}
-                  </li>
-                ))}
-              </ul>
+
+              <div className="mt-4">
+                {disponibilidad?.estado === "error" ? (
+                  <p className="text-zinc-500">
+                    No pudimos consultar la disponibilidad. Intenta de nuevo.
+                  </p>
+                ) : disponibilidad?.estado === "cerrado" ? (
+                  <p className="text-zinc-500">La barbería no abre ese día.</p>
+                ) : disponibilidad?.slots.length === 0 ? (
+                  <p className="text-zinc-500">
+                    No quedan horarios libres para esa fecha.
+                  </p>
+                ) : (
+                  <ul className="flex flex-wrap gap-2">
+                    {disponibilidad?.slots.map((slot) => (
+                      <li key={slot.inicio.toISOString()}>
+                        <Link
+                          href={`/agendar/confirmar?servicio=${servicio.id}&fecha=${fecha}&hora=${slot.hora}`}
+                          className="block rounded-md border border-zinc-300 px-4 py-2 text-lg hover:border-amber-700 hover:bg-amber-50"
+                        >
+                          {slot.hora}
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
             </>
           )}
         </div>

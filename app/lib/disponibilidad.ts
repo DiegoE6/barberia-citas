@@ -67,6 +67,27 @@ export function fechaDeHoy() {
   }).format(new Date());
 }
 
+/**
+ * "2026-08-29" -> "sábado, 29 de agosto de 2026".
+ *
+ * Ojo con la trampa: `new Date("2026-08-29")` se interpreta como medianoche
+ * UTC y en México mostraría el día anterior. Por eso la fecha se arma por
+ * partes con Date.UTC y se formatea en UTC: no hay conversión de zona de por
+ * medio, solo se está mostrando una fecha de calendario.
+ */
+export function formatFechaLarga(fecha: string) {
+  const [year, month, day] = fecha.split("-").map(Number);
+  const soloFecha = new Date(Date.UTC(year, month - 1, day));
+
+  return new Intl.DateTimeFormat("es-MX", {
+    timeZone: "UTC",
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  }).format(soloFecha);
+}
+
 export async function getDisponibilidad(
   fecha: string,
   duracionMinutos: number

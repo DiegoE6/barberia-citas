@@ -354,3 +354,47 @@ lo reportáramos como "cerrado", le estaríamos diciendo al cliente que la
 barbería no abre ese día. Es el mismo cuidado que ya se había tomado en
 `Schedule.tsx` para no pintar los siete días como "Cerrado" ante un error
 de red.
+
+## Flujo de reserva en tres pasos, sin JavaScript de cliente (2026-08-25)
+
+**Contexto**: al verificar el Paso A se detectó un problema real de la
+página de una sola pantalla: si el usuario cambia el desplegable de
+servicio sin volver a enviar el formulario, los horarios de abajo siguen
+siendo de la consulta anterior. En una página de verificación da igual,
+pero en el formulario real **alguien podría reservar creyendo que pidió
+otro servicio**.
+
+**Opciones consideradas**:
+- **Auto-enviar el formulario al cambiar el select.** Es el arreglo de UX
+  más directo, pero obliga a convertir la página en Client Component
+  (`"use client"`) solo para eso. Descartada: introduce JavaScript de
+  cliente en un flujo que hasta ahora no lo necesita.
+- **Campos ocultos con los valores de la URL**, dejando todo en una
+  pantalla. Elimina el peligro (lo que se envía es lo que se calculó),
+  pero no el desconcierto: el desplegable seguiría mostrando una cosa y
+  la lista otra. Insuficiente por sí sola.
+- **Flujo en tres pasos** — elegida.
+
+**Decisión**: `/agendar` (elegir servicio y fecha, ver horarios) →
+`/agendar/confirmar` (resumen y datos de contacto) → `/agendar/listo`.
+
+Cada horario es un enlace que lleva el servicio y la fecha **de la URL**,
+no del desplegable, así que el desajuste no puede llegar a la reserva. Y
+la pantalla de confirmación muestra servicio, fecha, hora y precio
+tomados de la URL, sin ningún control editable a la vista: el cliente ve
+exactamente lo que va a agendar antes de dar sus datos.
+
+Ventajas adicionales: es el patrón POST/Redirect/GET de toda la vida, así
+que recargar la pantalla final no crea una segunda cita; y revalidar la
+disponibilidad al entrar a `confirmar` evita que alguien escriba su
+nombre y teléfono en un horario que ya se ocupó.
+
+**Todo el flujo es HTML plano**: formularios `method="get"`, un
+`<form action={serverAction}>`, y los errores viajan como `?error=` en la
+URL en vez de por `useActionState`. Cero `"use client"` en el proyecto.
+
+**Nota de privacidad**: los errores se devuelven por redirect, y en esas
+URLs van solo servicio, fecha y hora. El nombre y el teléfono **nunca**
+se ponen en un query string, porque quedarían en el historial del
+navegador y en los logs del servidor. El costo es que ante un error el
+cliente los reescribe; el `required` del HTML hace que sea raro.
