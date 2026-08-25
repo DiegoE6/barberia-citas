@@ -13,11 +13,11 @@
 - [x] La landing lee servicios y horarios desde la BD, ya no de data.ts
 
 ## Fase 3 — Reserva de citas
-- [ ] Tabla `excepciones` (cierres de una fecha concreta: festivos, vacaciones)
-- [ ] Formulario público: servicio, fecha, hora, nombre, teléfono
-- [ ] Mostrar solo horarios libres según duración del servicio
-- [ ] Validar que no se empalmen citas
-- [ ] Confirmación al cliente
+- [x] Tabla `excepciones` (cierres de una fecha concreta: festivos, vacaciones)
+- [x] Formulario público: servicio, fecha, hora, nombre, teléfono
+- [x] Mostrar solo horarios libres según duración del servicio
+- [x] Validar que no se empalmen citas
+- [x] Confirmación al cliente
 
 ## Fase 4 — Panel de administración
 - [ ] Login del dueño (Supabase Auth)

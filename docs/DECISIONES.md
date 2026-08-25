@@ -398,3 +398,39 @@ URLs van solo servicio, fecha y hora. El nombre y el teléfono **nunca**
 se ponen en un query string, porque quedarían en el historial del
 navegador y en los logs del servidor. El costo es que ante un error el
 cliente los reescribe; el `required` del HTML hace que sea raro.
+
+## Jerarquía de acciones y color de acción (2026-08-25)
+
+**Contexto**: con la Fase 3 en producción, la landing seguía empujando a
+WhatsApp. El botón "Agendar cita" del Hero apuntaba a WhatsApp, y
+`Contact.tsx` tenía un segundo botón ámbar idéntico. El sistema propio de
+citas competía contra el canal manual que venía a reemplazar.
+
+**Decisión — una sola acción primaria por pantalla**: agendar en línea es
+la acción primaria y se ve como botón sólido; WhatsApp baja a enlace de
+texto subrayado, sin fondo, en gris. Sigue disponible para quien prefiera
+hablar con una persona, pero deja de disputar la atención.
+
+**Decisión — `amber-700` como color de acción en todo el sitio.** El
+`amber-600` que usaba la landing da **3.2:1** de contraste con texto
+blanco. WCAG AA pide 4.5:1 para texto normal, así que no pasaba;
+`amber-700` da **5.0:1** y sí. No es teórico: el cliente típico abre esto
+en la calle, con sol, en un celular. Como el flujo de `/agendar` ya usaba
+`amber-700`, el cambio además unificó landing y reserva, que hasta ahora
+no combinaban.
+
+**Nuevo `Header.tsx` en el layout**, con el nombre del negocio enlazando a
+`/` y el botón de agendar. Cumple dos funciones: tener la acción primaria
+siempre a un toque —es *sticky*—, y ser la vía de regreso a la landing
+desde `/agendar`, que es donde la gente ya busca ese enlace.
+
+**Trade-off aceptado**: el header también sale en `/agendar/confirmar`,
+donde su botón funciona como "empezar de nuevo" y abandona la reserva a
+medias. Ocultarlo requeriría `usePathname()`, que obliga a `"use client"`.
+Se prefirió mantener el proyecto en cero componentes de cliente.
+
+**Otros arreglos incluidos**: `lang="en"` → `lang="es-MX"` en el layout
+(el sitio está íntegramente en español y un lector de pantalla lo
+pronunciaba con fonética inglesa), y la descripción en `metadata`, que
+decía "agenda tu cita por WhatsApp" — justo el mensaje que se quería
+dejar atrás.
