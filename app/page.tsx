@@ -5,7 +5,7 @@ import Location from "@/app/components/Location";
 import Contact from "@/app/components/Contact";
 import Footer from "@/app/components/Footer";
 
-// Los servicios vienen de Supabase y cambian pocas veces al mes.
+// Los servicios y los horarios vienen de Supabase y cambian pocas veces al mes.
 // Regenerar la página cada 5 min mantiene el costo de consultas despreciable
 // sin que el dueño tenga que esperar mucho para ver un precio actualizado.
 // Ver docs/DECISIONES.md. En la Fase 4 (panel de admin) esto se reemplaza

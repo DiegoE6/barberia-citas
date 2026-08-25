@@ -8,7 +8,7 @@
 ## Fase 2 — Base de datos
 - [x] Proyecto en Supabase + variables en .env.local
 - [x] Tabla `servicios` (nombre, descripción, precio, duración en minutos)
-- [ ] Tabla `horarios_semana` (bloques del patrón semanal: día, hora inicio, hora fin)
+- [x] Tabla `horarios_semana` (bloques del patrón semanal: día, hora inicio, hora fin)
 - [ ] Tabla `citas` (nombre, teléfono, servicio, fecha y hora, estado)
 - [ ] La landing lee servicios y horarios desde la BD, ya no de data.ts
 

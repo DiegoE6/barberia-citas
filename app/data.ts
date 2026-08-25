@@ -1,20 +1,11 @@
-// Datos ficticios del negocio. Cuando se agregue Supabase, esto se moverá a la base de datos.
+// Datos ficticios del negocio que todavía no viven en la base de datos.
+// Los servicios salen de la tabla `servicios` y los horarios de `horarios_semana`.
 export const siteConfig = {
   name: "Barbería El Roble",
   city: "Monterrey",
   whatsappNumber: "5218112345678", // Número ficticio
   whatsappMessage: "Hola, quiero agendar una cita",
 };
-
-export const schedule = [
-  { day: "Lunes", hours: "10:00 - 20:00" },
-  { day: "Martes", hours: "10:00 - 20:00" },
-  { day: "Miércoles", hours: "10:00 - 20:00" },
-  { day: "Jueves", hours: "10:00 - 20:00" },
-  { day: "Viernes", hours: "10:00 - 21:00" },
-  { day: "Sábado", hours: "09:00 - 18:00" },
-  { day: "Domingo", hours: "Cerrado" },
-];
 
 export const location = {
   address: "Av. Roble 123, Col. Contry",
