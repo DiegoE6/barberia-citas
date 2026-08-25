@@ -88,3 +88,112 @@ cada semana. Irán en una tabla `excepciones` (fecha + abierto/cerrado)
 en la Fase 3. La política RLS de lectura es `to anon`, igual que la de
 `servicios`; cuando la Fase 4 traiga Supabase Auth habrá que revisar
 ambas para el rol `authenticated`.
+
+## Citas: instantes, foto del momento y empalme en la BD (2026-08-25)
+
+**Contexto**: la tabla `citas` es la única de las tres que guarda datos
+personales y la única que crece sin techo. Tiene que alimentar el
+formulario público (Fase 3), la agenda del dueño (Fase 4) y, más
+adelante, un reporte de ventas.
+
+### Sin lectura pública
+
+`servicios` y `horarios_semana` tienen política `for select to anon`
+porque son datos públicos. `citas` **no la tiene y no debe tenerla**: la
+anon key viaja en el bundle del navegador, así que abrir la lectura
+equivale a publicar la lista de clientes del negocio con sus teléfonos.
+La única política es de `insert`, con un `with check` que impide
+auto-confirmarse una cita o agendar en el pasado.
+
+La Fase 3 necesita saber qué horarios están ocupados sin poder leer la
+tabla. Opciones para entonces: una vista que exponga solo `inicio`/`fin`
+sin columnas personales, una función RPC que devuelva directamente los
+slots libres, o calcularlo en el servidor de Next.js con la
+`service_role key`. Ninguna requiere abrir `citas` a `anon`. Se decide en
+la Fase 3; cerrar la tabla hoy es lo que permite posponerlo sin riesgo.
+
+Riesgo conocido que queda abierto: sin autenticación, `anon` puede
+insertar citas ilimitadas. Las defensas (rate limit, captcha, verificar
+el teléfono) son tema de Fase 3/4.
+
+### `inicio` y `fin` como `timestamptz`
+
+**Opciones consideradas**:
+- `date` + `time` por separado — compara directo contra `horarios_semana`,
+  que usa `time` local, pero un rango partido en dos columnas complica la
+  restricción de empalme, que es la validación crítica. Descartada.
+- Un solo `tstzrange` — lo más directo para el empalme, pero PostgREST lo
+  entrega como texto y sería incómodo para el panel de la Fase 4.
+  Descartada.
+- Dos columnas `timestamptz` — elegida.
+
+La conversión a hora local del negocio (`America/Monterrey`) para
+comparar contra `horarios_semana` se hace en un solo lugar: el generador
+de slots de la Fase 3.
+
+### Foto del momento: `fin` y `precio_cobrado`
+
+Las dos se guardan en vez de derivarse de `servicios`, por la misma
+razón: **un cambio de configuración no debe reescribir el pasado.**
+
+- `fin` no se calcula con un join a `servicios.duracion_minutos`. Si el
+  dueño cambia la duración de un servicio de 45 a 60 minutos, las citas
+  ya agendadas se alargarían retroactivamente y podrían empalmarse entre
+  sí sin que nadie las tocara.
+- `precio_cobrado numeric(10,2)` nullable, copiada del servicio al
+  agendar. Se agregó desde el inicio y no cuando llegue el reporte,
+  porque el costo es asimétrico: la columna cuesta una línea hoy, pero
+  agregarla después deja todo el historial previo en `NULL` sin forma de
+  recuperarlo. El reporte de "cuánto vendí este mes" es parte del
+  argumento de venta del producto, así que va a llegar.
+
+### El empalme se garantiza en la base de datos
+
+Un chequeo en el código de la Fase 3 ("busca citas que choquen, si no hay,
+inserta") tiene una **condición de carrera**: dos clientes que agendan el
+mismo horario en el mismo segundo pasan los dos la revisión y se insertan
+los dos. Pasa justo cuando se manda una promoción por WhatsApp y varios
+entran a la vez, y es invisible en pruebas.
+
+**Decisión**: restricción `EXCLUDE` sobre `tstzrange(inicio, fin, '[)')`.
+El chequeo en el código se mantiene, pero su trabajo pasa a ser dar un
+mensaje bonito; el que garantiza la integridad es el constraint.
+
+Detalles:
+- El rango es `'[)'` (abierto al final) a propósito: una cita de
+  10:00-10:30 y otra de 10:30-11:00 son adyacentes, no empalmadas. Con el
+  default equivocado no se podrían agendar dos cortes seguidos.
+- Un `where estado <> 'cancelada'` hace que cancelar libere el horario.
+- No hace falta `btree_gist`, a diferencia de lo que sí requeriría un
+  `EXCLUDE` en `horarios_semana`: aquí es solapamiento puro de rangos, sin
+  igualdad sobre una columna escalar.
+
+**Supuesto: una sola silla.** La restricción prohíbe dos citas
+simultáneas en todo el negocio. El día que haya un segundo barbero tiene
+que pasar a ser por barbero (`barbero_id WITH =` más el rango), y
+*entonces* sí entra `btree_gist`.
+
+### Pendiente para la Fase 3
+
+El `with check` de la política de insert solo alcanza a validar
+`estado` e `inicio`. No puede verificar que `fin` corresponda a la
+duración real del servicio ni que `precio_cobrado` sea el precio real:
+como el insert lo hace `anon`, el cliente controla esos valores. Las dos
+salidas son un trigger `before insert` que los calcule desde
+`servicio_id` ignorando lo que mande el cliente, o hacer el insert del
+lado del servidor con la `service_role key`. Se decide junto con el resto
+del modelo de acceso de la Fase 3.
+
+### Otras decisiones menores
+
+- `estado` es `text` con `check` en (`pendiente`, `confirmada`,
+  `cancelada`), no un `enum`: es probable que la Fase 4 quiera agregar
+  `no_asistio`, y ampliar un `check` es un `alter` simple.
+- `telefono` es `text`, nunca numérico: se perderían los ceros a la
+  izquierda y no cabría el prefijo `+52`.
+- `servicio_id` con `on delete restrict` explícito: si el dueño intenta
+  borrar un servicio con citas históricas, Postgres se lo impide y lo
+  obliga a usar `activo = false`.
+- Índice en `inicio`, esta vez sí. Al contrario de `horarios_semana`, que
+  tiene 8 filas para siempre, `citas` crece sin techo, y tanto la agenda
+  como la disponibilidad filtran por rango de fechas.
