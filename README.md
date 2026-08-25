@@ -7,6 +7,9 @@ o libreta, y pierden citas por no tener dónde reservar.
 
 ![Landing](docs/img/landing.png)
 ![Servicios](docs/img/servicios.png)
+![Seleccionar](docs/img/seleccionar.png)
+![Datos](docs/img/datos.png)
+![Confirmacion](docs/img/confirmacion.png)
 
 ## El problema
 
@@ -42,8 +45,8 @@ Abrir http://localhost:3000
 ## Estado del proyecto
 
 - [x] Fase 1 — Landing pública
-- [ ] Fase 2 — Base de datos
-- [ ] Fase 3 — Reserva de citas
+- [x] Fase 2 — Base de datos
+- [x] Fase 3 — Reserva de citas
 - [ ] Fase 4 — Panel de administración
 
 Ver [docs/PLAN.md](docs/PLAN.md) para el detalle.
