@@ -9,7 +9,7 @@
 - [x] Proyecto en Supabase + variables en .env.local
 - [x] Tabla `servicios` (nombre, descripción, precio, duración en minutos)
 - [x] Tabla `horarios_semana` (bloques del patrón semanal: día, hora inicio, hora fin)
-- [ ] Tabla `citas` (nombre, teléfono, servicio, inicio y fin, estado, precio cobrado)
+- [x] Tabla `citas` (nombre, teléfono, servicio, inicio y fin, estado, precio cobrado)
 - [x] La landing lee servicios y horarios desde la BD, ya no de data.ts
 
 ## Fase 3 — Reserva de citas
