@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { verifySession } from "@/app/lib/auth";
 import { cerrarSesion } from "@/app/actions/auth";
+import { confirmarCita } from "@/app/actions/agenda";
 import { fechaDeHoy, formatFechaLarga } from "@/app/lib/disponibilidad";
 import {
   getAgendaDelDia,
@@ -57,6 +58,31 @@ function Fila({ cita }: { cita: CitaAgenda }) {
             {cita.telefono}
           </a>
         </p>
+
+        {/* Acciones asimétricas a propósito: confirmar es seguro y va a un
+            toque; cancelar es destructivo y vive en el detalle, detrás del
+            enlace "Ver". Un botón de cancelar aquí se toca sin querer con el
+            cliente enfrente. */}
+        <div className="mt-2 flex items-center gap-4">
+          {cita.estado === "pendiente" && (
+            <form action={confirmarCita}>
+              <input type="hidden" name="cita" value={cita.id} />
+              <button
+                type="submit"
+                className="rounded-md bg-amber-700 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-amber-800"
+              >
+                Confirmar
+              </button>
+            </form>
+          )}
+
+          <Link
+            href={`/admin/cita/${cita.id}`}
+            className="py-2 text-sm font-medium text-zinc-600 underline underline-offset-4 transition-colors hover:text-zinc-900"
+          >
+            Ver
+          </Link>
+        </div>
       </div>
     </li>
   );
@@ -192,10 +218,15 @@ export default async function AdminPage({
               <ul className="mt-2 flex flex-col gap-1 text-sm text-zinc-500">
                 {agenda.canceladas.map((cita) => (
                   <li key={cita.id}>
-                    <span className="tabular-nums line-through">
-                      {formatHoraCorta(cita.inicio)}
-                    </span>{" "}
-                    {cita.nombreCliente} · {cita.servicio}
+                    <Link
+                      href={`/admin/cita/${cita.id}`}
+                      className="underline underline-offset-4 transition-colors hover:text-zinc-900"
+                    >
+                      <span className="tabular-nums line-through">
+                        {formatHoraCorta(cita.inicio)}
+                      </span>{" "}
+                      {cita.nombreCliente} · {cita.servicio}
+                    </Link>
                   </li>
                 ))}
               </ul>

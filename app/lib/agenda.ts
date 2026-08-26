@@ -69,6 +69,16 @@ export function formatHoraCorta(instante: Date) {
   }).format(instante);
 }
 
+/** Instante -> "YYYY-MM-DD" en el reloj del negocio. Dirección fácil. */
+export function fechaLocalDe(instante: Date) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(instante);
+}
+
 export function formatDuracion(ms: number) {
   const minutos = Math.round(ms / 60000);
   const horas = Math.floor(minutos / 60);
