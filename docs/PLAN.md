@@ -19,9 +19,10 @@
 - [x] Confirmación al cliente
 
 ## Fase 4 — Panel de administración
-- [ ] Login del dueño (Supabase Auth)
-- [ ] Agenda del día y de la semana
-- [ ] Cancelar y confirmar citas
+- [x] Login del dueño (Supabase Auth)
+- [x] Agenda del día — verificada en producción
+- [ ] Agenda de la semana (resumen por día, enlazando a cada agenda)
+- [x] Cancelar y confirmar citas
 - [ ] Editar servicios, precios y horarios
 - [ ] Tabla `excepciones` (cerrar un día concreto: festivos, vacaciones) y
       filtrarla en el cálculo de slots
