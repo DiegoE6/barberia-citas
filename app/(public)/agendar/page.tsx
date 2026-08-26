@@ -148,7 +148,7 @@ export default async function AgendarPage({
           )}
         </div>
 
-        <p className="mt-10 text-center text-xs text-zinc-400">
+        <p className="mt-10 text-center text-xs text-zinc-500">
           Paso de {SLOT_STEP_MINUTES} min · anticipación mínima de{" "}
           {MIN_LEAD_MINUTES} min
         </p>

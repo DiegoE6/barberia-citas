@@ -556,3 +556,53 @@ fiable de autorización. La regla sigue siendo la del patrón Data Access
 Layer: **cada página del panel llama a `verifySession()` en su primera
 línea**. El layout de admin, además, envuelve también a `/admin/login`, que
 por definición no tiene sesión.
+
+## Sin modo oscuro a medias (2026-08-25)
+
+**Contexto**: al revisar la agenda en el celular, el dueño reportó que el
+contraste estaba invertido — la hora, el nombre del cliente y el título se
+veían en gris clarísimo, mientras que el servicio y el "Termina 15:30" se
+leían bien. Justo los dos datos más importantes eran los que menos se
+veían.
+
+**La causa no eran las clases.** `globals.css` traía de la plantilla:
+
+```css
+@media (prefers-color-scheme: dark) {
+  :root { --foreground: #ededed; }
+}
+body { color: var(--foreground); }
+```
+
+El `<main>` del panel fija `bg-white` pero no fijaba color de texto. Con el
+celular en modo oscuro, todo elemento **sin** clase de color heredaba
+`#ededed`: casi blanco sobre blanco. Los elementos que sí tenían clase
+(`text-zinc-600`, `text-zinc-500`) se veían bien precisamente porque la
+sobrescribían. De ahí la inversión.
+
+**Decisión**: eliminar el bloque de `prefers-color-scheme: dark`. La app no
+tiene tema oscuro — todas las secciones fijan fondos claros (`bg-white`,
+`bg-zinc-50`) — así que ese bloque no implementaba un tema, solo dejaba una
+trampa: cualquier elemento nuevo sin clase de color nacía invisible para
+quien usa modo oscuro. Si algún día se hace tema oscuro de verdad, tiene
+que ser en todas las superficies a la vez.
+
+**Segunda medida**: `app/admin/layout.tsx` fija `text-zinc-900` en el
+`<main>`. El color base no se hereda del `body`.
+
+### Jerarquía de contraste del panel
+
+Mismo criterio que llevó a `amber-700` en la landing: esto se lee en la
+calle, con sol. Todos los tonos usados pasan WCAG AA (4.5:1) sobre blanco.
+
+| Dato | Tono | Contraste |
+|---|---|---|
+| Hora de inicio, nombre del cliente, título | `zinc-900` | ~17:1 |
+| Servicio, teléfono | `zinc-700` | 10.4:1 |
+| "Termina", totales, controles de fecha | `zinc-600` | 7.7:1 |
+| Huecos, canceladas | `zinc-500` | 4.8:1 |
+
+`zinc-400` (2.6:1) y `zinc-300` (~1.5:1) quedan **prohibidos sobre fondo
+claro**; sobre `bg-zinc-900` sí son correctos y ahí se conservan (Hero y
+Contact). La auditoría encontró un caso más fuera del panel: la nota al pie
+de `/agendar`, que estaba en `zinc-400` sobre blanco.
