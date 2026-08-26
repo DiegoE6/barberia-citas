@@ -33,7 +33,11 @@ export default function AdminLayout({
         </div>
       </header>
 
-      <main className="flex flex-1 flex-col bg-white">{children}</main>
+      {/* El color de texto se fija aquí, no se hereda: un elemento sin
+          clase de color no debe depender del tema del sistema. */}
+      <main className="flex flex-1 flex-col bg-white text-zinc-900">
+        {children}
+      </main>
     </>
   );
 }

@@ -12,12 +12,16 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
+/* No hay bloque de modo oscuro a propósito.
+ *
+ * Venía uno de la plantilla que ponía --foreground en #ededed (casi blanco),
+ * pero la app no tiene tema oscuro: todas las secciones fijan fondos claros
+ * (bg-white, bg-zinc-50). El resultado era que cualquier elemento SIN clase
+ * de color heredaba texto casi blanco sobre fondo blanco, e invisible, en el
+ * celular de cualquiera que use modo oscuro.
+ *
+ * Si algún día se implementa tema oscuro de verdad, hay que hacerlo en todas
+ * las superficies a la vez, no solo en el color del body. */
 
 body {
   background: var(--background);
