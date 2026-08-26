@@ -13,7 +13,6 @@
 - [x] La landing lee servicios y horarios desde la BD, ya no de data.ts
 
 ## Fase 3 — Reserva de citas
-- [x] Tabla `excepciones` (cierres de una fecha concreta: festivos, vacaciones)
 - [x] Formulario público: servicio, fecha, hora, nombre, teléfono
 - [x] Mostrar solo horarios libres según duración del servicio
 - [x] Validar que no se empalmen citas
@@ -24,3 +23,8 @@
 - [ ] Agenda del día y de la semana
 - [ ] Cancelar y confirmar citas
 - [ ] Editar servicios, precios y horarios
+- [ ] Tabla `excepciones` (cerrar un día concreto: festivos, vacaciones) y
+      filtrarla en el cálculo de slots
+- [ ] Freno anti-spam en el Server Action de citas (TODO en app/actions/citas.ts)
+- [ ] Migrar la landing de `revalidate = 300` a `revalidatePath('/')` al guardar
+      (ver primera entrada de docs/DECISIONES.md)
