@@ -434,3 +434,125 @@ Se prefirió mantener el proyecto en cero componentes de cliente.
 pronunciaba con fonética inglesa), y la descripción en `metadata`, que
 decía "agenda tu cita por WhatsApp" — justo el mensaje que se quería
 dejar atrás.
+
+## Autenticación del panel: identidad separada de acceso (2026-08-25)
+
+**Contexto**: la Fase 4 necesita proteger `/admin`. El proyecto ya tenía un
+modelo de acceso a datos —`service_role` en el servidor, RLS cerrado en
+`citas`— y había que decidir cómo encaja Supabase Auth con eso.
+
+### La idea que ordena todo
+
+**Supabase Auth responde "¿quién eres?". `service_role` responde "¿qué
+puedes tocar?".** Son dos preguntas distintas y las resuelven piezas
+distintas. Auth se usa aquí solo como proveedor de identidad, no como
+mecanismo de autorización de la base de datos.
+
+Flujo: `proxy.ts` ve la cookie → `verifySession()` valida el token y
+confirma que es el dueño → recién entonces la página usa `supabaseAdmin`.
+
+**`citas` no cambió: sigue con RLS activo y cero políticas.** El
+`07-cerrar-citas.sql` sigue siendo correcto.
+
+### El dueño NO necesita rol `authenticated` en las políticas
+
+El panel pasa por el servidor, donde `service_role` ignora RLS. El rol
+`authenticated` solo importaría si el navegador del dueño hablara directo
+con Supabase con su propio token, y no lo hace.
+
+**Cuándo revisar esta decisión**: cuando haya varias personas con permisos
+distintos (un barbero que ve solo su agenda, un dueño que ve todo). Ahí la
+autorización pertenece a la base de datos, porque un olvido en el código
+falla *cerrado* en vez de dar acceso total. Hoy, con un único dueño,
+agregar políticas `authenticated` sería mantener dos modelos de
+autorización en paralelo sin ganar nada.
+
+**Trade-off aceptado**: con `service_role`, quien autoriza es el código,
+no el motor. Si se olvida `verifySession()` en una página del panel, esa
+página tiene acceso total. Se mitiga con el patrón Data Access Layer que
+recomiendan los docs de Next: la verificación vive en un solo archivo
+(`app/lib/auth.ts`) y toda página del panel la llama en su primera línea,
+lo que hace la regla auditable con un `grep`.
+
+### El agujero del registro público
+
+**El endpoint de registro de Supabase es público y funciona con la anon
+key**, que va en el bundle del navegador. Si `verifySession()` solo
+preguntara "¿hay un usuario logueado?", cualquiera podría registrarse por
+su cuenta y entrar al panel.
+
+Dos medidas, las dos:
+1. Desactivar el registro en Supabase (Authentication > Providers > Email >
+   Enable sign ups).
+2. `verifySession()` compara contra `ADMIN_USER_ID`, el UUID del dueño en
+   una variable de entorno. Se eligió el UUID y no el correo porque el
+   correo puede cambiar. `iniciarSesion` hace la misma comprobación y cierra
+   la sesión recién abierta si no coincide, para no dejar una cookie válida
+   dando vueltas.
+
+Si falta `ADMIN_USER_ID`, `verifySession()` lanza en vez de dejar pasar:
+falla cerrado.
+
+### Dos capas, no una
+
+- **`proxy.ts`** — chequeo *optimista*: mira que exista la cookie y rebota
+  a `/admin/login`. También renueva la sesión y escribe las cookies
+  actualizadas, cosa obligatoria porque los Server Components no pueden
+  escribir cookies y sin eso el dueño se desloguearía solo. Corre solo con
+  `matcher: ["/admin/:path*"]`, para no pagar una llamada a Auth en cada
+  visita pública.
+- **`verifySession()`** — la protección real. Los docs de Next son
+  explícitos: el proxy *"no debería ser tu única línea de defensa"*.
+
+### Detalles de versión y de librería
+
+- **`@supabase/ssr` 0.12.5**, dependencia nueva y justificada: hace que la
+  sesión viva en cookies en vez de en el `localStorage` del navegador, que
+  el servidor no puede ver. La alternativa era escribir a mano la rotación
+  del refresh token, que es plomería sensible y fácil de equivocar.
+- **En Next 16 `middleware.ts` está deprecado y se llama `proxy.ts`.** Casi
+  todos los tutoriales de Supabase + Next todavía dicen "middleware".
+- **`cookies()` es asíncrono** en Next 16: se usa `await cookies()`.
+- **No se usa `getSession()` para autorizar.** La propia librería advierte
+  que su resultado sale de la cookie sin verificar y no debe confiarse. Se
+  usa `getUser()`, que valida contra el servidor de Auth. (`getClaims()`
+  sería más rápido si el proyecto usa llaves de firma asimétricas; se puede
+  cambiar más adelante.)
+
+## Route groups: sitio público y panel separados (2026-08-25)
+
+**Contexto**: con el panel en marcha, el layout raíz metía el Header y el
+Footer de la barbería en `/admin` también. El panel mostraba el botón
+"Agendar cita" —que al dueño no le sirve— y el pie de página de marketing.
+
+**Decisión**: separar en dos route groups.
+
+```
+app/layout.tsx              solo <html>, <body>, fuentes y metadata
+app/(public)/layout.tsx     Header + main + Footer
+app/(public)/page.tsx       landing
+app/(public)/agendar/…      flujo de reserva
+app/admin/layout.tsx        barra sobria, sin CTA
+app/admin/…                 panel
+```
+
+Los paréntesis de `(public)` hacen que la carpeta **no aparezca en la
+URL**: la landing sigue siendo `/` y la reserva `/agendar`. El
+`export const revalidate = 300` se movió con la página y sigue aplicando.
+
+Se hizo ahora, con dos páginas de panel, precisamente porque mover
+carpetas después —con ocho— obligaría a revisar cada una.
+
+**Detalle de la mudanza**: Next genera validadores de rutas tipadas en
+`.next/dev/types/`. Después de mover carpetas, esa caché queda apuntando a
+las rutas viejas y el build falla con `TS2307: Cannot find module`. Se
+resuelve borrando `.next` y reconstruyendo; no es un error del código.
+
+**Lo que NO se hizo, a propósito: verificar la sesión en
+`app/admin/layout.tsx`.** Es tentador, porque parece el lugar natural para
+proteger todo el panel de una vez. Pero los layouts no se vuelven a
+ejecutar en cada navegación entre páginas hijas, así que no son un punto
+fiable de autorización. La regla sigue siendo la del patrón Data Access
+Layer: **cada página del panel llama a `verifySession()` en su primera
+línea**. El layout de admin, además, envuelve también a `/admin/login`, que
+por definición no tiene sesión.
