@@ -606,3 +606,101 @@ calle, con sol. Todos los tonos usados pasan WCAG AA (4.5:1) sobre blanco.
 claro**; sobre `bg-zinc-900` sí son correctos y ahí se conservan (Hero y
 Contact). La auditoría encontró un caso más fuera del panel: la nota al pie
 de `/agendar`, que estaba en `zinc-400` sobre blanco.
+
+## Confirmar y cancelar: fricción asimétrica (2026-08-25)
+
+**Contexto**: primeras acciones que escriben desde el panel. Se tocan en un
+celular, con el cliente enfrente, y una de las dos es destructiva.
+
+### Tres actions, no uno parametrizado
+
+Un `cambiarEstado(citaId, estado)` recibiría el estado desde el formulario,
+o sea desde fuera. El `CHECK` de la tabla limita los valores posibles, pero
+no impide una transición sin sentido.
+
+**Decisión**: `confirmarCita`, `cancelarCita` y `reactivarCita`, cada uno con
+su lista de estados de origen fija en el código. El helper `aplicarCambio`
+**no se exporta**: en un archivo `"use server"` cada función exportada es un
+endpoint público, así que dejarlo privado es lo que impide llamarlo con
+valores arbitrarios.
+
+`verifySession()` va **dentro del action**, no solo en la página. La página
+no protege nada: el action es un endpoint POST propio, alcanzable sin pasar
+por `/admin`.
+
+El filtro de estado va dentro del `UPDATE` (`.in("estado", desde)`), no en
+una lectura previa: así comprobar y escribir son una sola operación atómica.
+Si la cita cambió en el intermedio, no coincide, no se escribe, y las cero
+filas afectadas se reportan como error de transición.
+
+### ⚠️ Propiedad de la cita: el agujero que abre el multi-negocio
+
+**Hoy `aplicarCambio` NO verifica de quién es la cita.** Recibe el `citaId`
+del formulario —o sea, de fuera— y actúa sobre él sin más comprobación que
+la sesión del dueño.
+
+Hoy es correcto: hay un solo negocio y un solo dueño, así que todas las
+citas son suyas y no existe "la cita de otro".
+
+**Deja de ser correcto en el momento en que el sistema sirva a varios
+negocios**, que es justamente el plan del producto. Ahí, `verifySession()`
+seguiría diciendo "sí, es un dueño válido" —pero no *cuál*—, y el dueño de
+la Barbería A podría cancelar citas de la Barbería B **simplemente
+cambiando el número en el formulario**. No haría falta hackear nada: los
+ids son consecutivos.
+
+Es el tipo de agujero que no existe mientras el sistema es de un solo
+inquilino y aparece completo el día que deja de serlo, sin que ninguna
+línea de código haya cambiado. Por eso queda escrito aquí y como comentario
+en `app/actions/agenda.ts`, y no solo en la cabeza de alguien.
+
+**Qué habrá que hacer**: cuando exista el concepto de negocio, el action
+tiene que leer la cita, resolver a qué negocio pertenece, y compararlo con
+el negocio de la sesión antes de escribir. La comprobación va en el
+servidor, nunca en el formulario.
+
+### Cancelar vive en el detalle, no en la fila
+
+| Acción | Dónde | Fricción |
+|---|---|---|
+| Confirmar | Botón en la fila de la agenda | Un toque. Es segura |
+| Cancelar | `/admin/cita/[id]` | Entrar a la cita |
+
+El botón dice **"Cancelar la cita de {nombre}"**, con el nombre adentro: no
+se puede cancelar a la persona equivocada sin leer de quién es.
+
+**Opción descartada: un `confirm()` del navegador.** Necesita
+`"use client"` —el proyecto lleva cero componentes de cliente— y sobre todo
+**un diálogo que sale siempre entrena a descartarlo**: a la tercera vez se
+acepta sin leer. Una pantalla que nombra a la persona sí se lee.
+
+### Reactivar usa maquinaria que ya existía
+
+Reactivar una cancelada la devuelve al alcance de la restricción `EXCLUDE`,
+que ignora las canceladas. Si alguien ya tomó ese horario, Postgres devuelve
+**23P01** — el mismo código que la reserva pública ya traduce. Sin escribir
+nada nuevo, reactivar queda protegido contra pisar una cita ajena.
+
+### El revalidado: que la ruta sea dinámica NO basta
+
+Se asumió que `/admin`, al ser `ƒ (Dynamic)`, se renderiza fresca siempre y
+no haría falta nada. **Es falso**, y los docs de Next 16 lo dicen:
+
+> *"An action that does none of the above carries only its return value, and
+> the current route is not re-rendered."*
+
+Sin llamar a algo, se muta la cita y la agenda sigue mostrando el estado
+viejo. Dinámica significa que no hay caché en el servidor, no que el action
+refresque la pantalla.
+
+**Decisión: `refresh()` de `next/cache`**, no `revalidatePath('/admin')`.
+La agenda vive en `/admin?fecha=2026-09-01`, y `refresh()` refresca *la ruta
+actual* sin tener que adivinar el query string. Solo se puede llamar desde un
+Server Action. El cambio se ve en el mismo viaje, sin recarga.
+
+`/agendar` no necesita nada: también es dinámica, así que un horario
+liberado por una cancelación aparece disponible de inmediato.
+
+**Esto NO cierra el pendiente de `revalidate = 300`** de la primera entrada
+de este archivo. Ese es de la landing, que muestra servicios y horarios, no
+citas. Se resuelve al hacer "editar servicios, precios y horarios".
