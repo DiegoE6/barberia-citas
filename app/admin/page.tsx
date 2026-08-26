@@ -107,7 +107,20 @@ export default async function AdminPage({
 
   return (
     <div className="mx-auto w-full max-w-3xl px-6 py-10">
-      <h1 className="text-3xl font-bold tracking-tight text-zinc-900">Agenda</h1>
+      <div className="flex flex-wrap items-baseline justify-between gap-4">
+        <h1 className="text-3xl font-bold tracking-tight text-zinc-900">
+          Agenda
+        </h1>
+        {/* La navegación del panel vive aquí y no en admin/layout.tsx: ese
+            layout envuelve también a /admin/login, donde todavía no hay
+            sesión y estos enlaces no deben verse. */}
+        <Link
+          href="/admin/servicios"
+          className="text-sm font-medium text-zinc-600 underline underline-offset-4 transition-colors hover:text-zinc-900"
+        >
+          Servicios y precios
+        </Link>
+      </div>
 
       {/* Navegación por GET con ?fecha= en la URL: funciona el botón atrás,
           se puede guardar en favoritos, y no hace falta JavaScript. */}

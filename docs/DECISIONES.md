@@ -1,6 +1,6 @@
 # Decisiones de arquitectura
 
-## Caché de la landing: revalidate = 300 (2026-08-14)
+## Caché de la landing: revalidate = 300 (2026-08-14) — ✅ migrada el 2026-08-26
 
 **Contexto**: `Services.tsx` lee la tabla `servicios` de Supabase. Como
 Next.js prerrenderiza la página como estática, un cambio de precio en
@@ -28,6 +28,14 @@ cambios de precio van a pasar por la propia app. En ese momento se puede
 llamar `revalidatePath('/')` justo después de guardar, y frescura pasa a
 ser inmediata sin necesidad de un webhook externo. Reemplazar el
 `revalidate` por tiempo en ese momento.
+
+**Hecho el 2026-08-26.** El editor de servicios del panel cerró la
+condición que faltaba: los precios ya se editan dentro de la app. Se quitó
+`export const revalidate = 300` de `app/(public)/page.tsx` y
+`app/actions/servicios.ts` llama a `revalidatePath('/')` después de
+guardar. La landing sigue siendo estática (`○` en el build), pero su
+frescura pasó de "hasta 5 minutos tarde" a inmediata. Ver la entrada
+"Editar servicios desde el panel".
 
 ## Horarios: una fila por bloque, no por día (2026-08-25)
 
@@ -704,3 +712,90 @@ liberado por una cancelación aparece disponible de inmediato.
 **Esto NO cierra el pendiente de `revalidate = 300`** de la primera entrada
 de este archivo. Ese es de la landing, que muestra servicios y horarios, no
 citas. Se resuelve al hacer "editar servicios, precios y horarios".
+
+## Editar servicios desde el panel (2026-08-26)
+
+**Contexto**: primera pieza de "editar servicios, precios y horarios". Se
+partió en dos —servicios primero, horarios después— porque son dos formas
+de datos que no se parecen: `servicios` es una lista plana de registros
+independientes, y `horarios_semana` son siete días fijos con uno a tres
+bloques cada uno. No comparten pantalla ni componente, y juntarlos habría
+hecho un cambio grande de revisar.
+
+### `refresh()` no bastaba: la landing es estática
+
+`agenda.ts` sale con `refresh()` y con eso le alcanza, porque `/admin` es
+una ruta dinámica. **La landing no lo es**: Next la sirve como HTML ya
+generado. Un precio nuevo guardado desde el panel no aparecería ahí hasta
+que algo avisara.
+
+`revalidatePath('/')` es ese aviso: marca el HTML guardado como caduco para
+que la siguiente visita lo regenere. Es lo que reemplaza al `revalidate =
+300`, que en vez de enterarse del cambio esperaba a que pasaran cinco
+minutos.
+
+`/agendar` **no necesita nada**: es dinámica y calcula la disponibilidad en
+cada petición, así que una duración nueva aplica al siguiente cálculo.
+
+### Salir por `redirect`, no por `refresh`
+
+Al revés que en `agenda.ts`. Confirmar una cita cambia una etiqueta a la
+vista; **guardar un precio deja el formulario con el mismo aspecto**, así
+que sin acuse de recibo el dueño no sabe si pasó algo. La acción sale con
+`redirect('/admin/servicios?ok=<id>')` y ese id pinta una etiqueta
+"guardado" junto al servicio. De paso es POST/Redirect/GET: recargar no
+reenvía el formulario.
+
+### Desactivar un servicio con citas futuras: avisar, no bloquear
+
+`activo = false` **no toca las citas ya agendadas**, y es correcto que no
+lo haga. Cada cita guarda `fin` y `precio_cobrado` como foto del momento, y
+la fila del servicio sigue existiendo —solo cambió una columna—, así que la
+agenda y el detalle se ven igual. Lo único que cambia es que deja de
+ofrecerse en `/agendar`, porque tanto el formulario público como
+`agendarCita` filtran por `activo = true`.
+
+Se descartó **bloquear la desactivación**: obligaría al dueño a cancelar
+citas reales de clientes solo para quitar un servicio del menú. Y se
+descartó **cancelar en cascada** por lo mismo, con el agravante de que es
+irreversible.
+
+Lo que sí se hizo es que el panel muestre el número de citas futuras junto
+al botón, con una frase que diga qué va a pasar con ellas. La acción es
+reversible con un toque, así que no lleva pantalla de confirmación aparte
+—a diferencia de cancelar una cita, que sí es destructiva.
+
+**Borrar no existe ni va a existir**: el `on delete restrict` de
+`citas.servicio_id` lo impide para cualquier servicio con historial, y
+"dejar de ofrecer" es el mecanismo que ese `restrict` estaba empujando
+desde el principio.
+
+### Dos actions para el interruptor, no una con el valor de parámetro
+
+`activarServicio` y `desactivarServicio`, con el booleano fijo en el
+código; `cambiarActivo` no se exporta. Mismo criterio que las tres actions
+de `agenda.ts`: en un archivo `"use server"` cada función exportada es un
+endpoint público, y un valor que viene en el formulario viene de fuera.
+
+### Detalles menores
+
+- **El conteo de citas futuras se calcula en `app/lib/servicios.ts`, no en
+  el componente.** Depende de `now()`, y leer el reloj durante el render
+  rompe la regla de pureza de React. Es el mismo motivo por el que la marca
+  "en curso" vive en `lib/agenda.ts`.
+- **Una sola consulta de citas para toda la lista**, agrupada en un `Map`
+  del lado de TypeScript, en vez de una consulta por servicio.
+- **Se leen los servicios con el cliente público.** La política de select de
+  `servicios` es `using (true)`, sin filtrar por `activo`, así que los
+  apagados también se leen y no hace falta la llave maestra. Las citas sí la
+  necesitan: esa tabla no tiene políticas.
+- **`descripcion` no se edita todavía.** La columna existe pero no se
+  muestra en ninguna parte del sitio; poner un campo para algo invisible
+  confunde más de lo que sirve. Entra el día que la landing la muestre.
+- **Topes de cordura en la duración**: entre 5 y 480 minutos. Un 0 rompería
+  el cálculo de `fin` y un valor absurdo se comería el día. El precio se
+  redondea a dos decimales antes de escribir, para que un "150.999" a mano
+  no llegue a la columna `numeric(10,2)`.
+- **La navegación del panel vive en `app/admin/page.tsx`, no en su
+  layout**: ese layout envuelve también a `/admin/login`, donde todavía no
+  hay sesión y esos enlaces no deben verse.
