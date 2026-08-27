@@ -1,4 +1,9 @@
 import { supabase } from "@/app/lib/supabase";
+import { DIAS, aHoraCorta } from "@/app/lib/horarios";
+
+// El orden de los días, sus nombres y el recorte de la hora viven en
+// app/lib/horarios.ts: el editor del panel necesita exactamente los mismos, y
+// dos copias que se separen dejarían la landing y el panel discrepando.
 
 // Un bloque continuo de atención, tal como viene de la tabla horarios_semana.
 // Un día normal tiene uno; el sábado tiene dos (horario partido).
@@ -8,25 +13,6 @@ type ScheduleBlock = {
   hora_fin: string;
   activo: boolean;
 };
-
-// Los días en el orden en que se muestran: lunes primero, domingo al final.
-// El número es la convención de la BD (0 = domingo ... 6 = sábado). Esta
-// constante define el orden y los nombres, así que la lista siempre tiene
-// los 7 renglones aunque a la tabla le falte alguna fila.
-const DAYS = [
-  { number: 1, label: "Lunes" },
-  { number: 2, label: "Martes" },
-  { number: 3, label: "Miércoles" },
-  { number: 4, label: "Jueves" },
-  { number: 5, label: "Viernes" },
-  { number: 6, label: "Sábado" },
-  { number: 0, label: "Domingo" },
-];
-
-// Postgres entrega un `time` como "10:00:00"; en pantalla basta "10:00".
-function formatTime(time: string) {
-  return time.slice(0, 5);
-}
 
 // Arma el texto de un día: sus rangos activos unidos con " y ", o "Cerrado"
 // si ese día no tiene ningún bloque activo.
@@ -38,7 +24,7 @@ function formatDayHours(dayBlocks: ScheduleBlock[]) {
   }
 
   return openBlocks
-    .map((block) => `${formatTime(block.hora_inicio)} - ${formatTime(block.hora_fin)}`)
+    .map((block) => `${aHoraCorta(block.hora_inicio)} - ${aHoraCorta(block.hora_fin)}`)
     .join(" y ");
 }
 
@@ -78,14 +64,14 @@ export default async function Schedule() {
           </p>
         ) : (
           <ul className="mt-10 flex flex-col divide-y divide-zinc-200">
-            {DAYS.map((day) => (
+            {DIAS.map((day) => (
               <li
-                key={day.number}
+                key={day.numero}
                 className="flex items-center justify-between py-3"
               >
-                <span className="text-lg">{day.label}</span>
+                <span className="text-lg">{day.nombre}</span>
                 <span className="text-lg text-zinc-600">
-                  {formatDayHours(blocksByDay.get(day.number) ?? [])}
+                  {formatDayHours(blocksByDay.get(day.numero) ?? [])}
                 </span>
               </li>
             ))}

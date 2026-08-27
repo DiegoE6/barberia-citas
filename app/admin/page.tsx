@@ -114,12 +114,20 @@ export default async function AdminPage({
         {/* La navegación del panel vive aquí y no en admin/layout.tsx: ese
             layout envuelve también a /admin/login, donde todavía no hay
             sesión y estos enlaces no deben verse. */}
-        <Link
-          href="/admin/servicios"
-          className="text-sm font-medium text-zinc-600 underline underline-offset-4 transition-colors hover:text-zinc-900"
-        >
-          Servicios y precios
-        </Link>
+        <nav className="flex gap-4">
+          <Link
+            href="/admin/servicios"
+            className="text-sm font-medium text-zinc-600 underline underline-offset-4 transition-colors hover:text-zinc-900"
+          >
+            Servicios y precios
+          </Link>
+          <Link
+            href="/admin/horarios"
+            className="text-sm font-medium text-zinc-600 underline underline-offset-4 transition-colors hover:text-zinc-900"
+          >
+            Horarios
+          </Link>
+        </nav>
       </div>
 
       {/* Navegación por GET con ?fecha= en la URL: funciona el botón atrás,
