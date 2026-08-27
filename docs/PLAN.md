@@ -23,9 +23,11 @@
 - [x] Agenda del día — verificada en producción
 - [ ] Agenda de la semana (resumen por día, enlazando a cada agenda)
 - [x] Cancelar y confirmar citas
-- [ ] Editar servicios, precios y horarios
+- [x] Editar servicios y precios
+- [ ] Editar horarios de la semana
+- [ ] Crear servicios nuevos y reordenarlos
 - [ ] Tabla `excepciones` (cerrar un día concreto: festivos, vacaciones) y
       filtrarla en el cálculo de slots
 - [ ] Freno anti-spam en el Server Action de citas (TODO en app/actions/citas.ts)
-- [ ] Migrar la landing de `revalidate = 300` a `revalidatePath('/')` al guardar
+- [x] Migrar la landing de `revalidate = 300` a `revalidatePath('/')` al guardar
       (ver primera entrada de docs/DECISIONES.md)
