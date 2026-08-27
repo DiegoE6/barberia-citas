@@ -24,7 +24,7 @@
 - [ ] Agenda de la semana (resumen por día, enlazando a cada agenda)
 - [x] Cancelar y confirmar citas
 - [x] Editar servicios y precios
-- [ ] Editar horarios de la semana
+- [x] Editar horarios de la semana
 - [ ] Crear servicios nuevos y reordenarlos
 - [ ] Tabla `excepciones` (cerrar un día concreto: festivos, vacaciones) y
       filtrarla en el cálculo de slots

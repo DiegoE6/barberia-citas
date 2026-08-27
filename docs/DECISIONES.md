@@ -799,3 +799,153 @@ endpoint público, y un valor que viene en el formulario viene de fuera.
 - **La navegación del panel vive en `app/admin/page.tsx`, no en su
   layout**: ese layout envuelve también a `/admin/login`, donde todavía no
   hay sesión y esos enlaces no deben verse.
+
+## Editar horarios: la pantalla esconde el modelo (2026-08-26)
+
+**Contexto**: segunda pieza de "editar servicios, precios y horarios". El
+problema de esta pantalla no era técnico sino de traducción. La tabla
+guarda **una fila por bloque** —decisión del 2026-08-25, y sigue siendo la
+correcta para el cálculo de slots—, pero **nadie piensa en bloques**. Un
+barbero no configura "las dos filas del sábado": sabe que cierra a comer.
+
+### Se edita el día completo, no la fila
+
+El formulario manda un día entero: si abre, y hasta tres tramos de horas.
+La traducción a filas ocurre en `app/actions/horarios.ts`, y la inversa
+—filas sueltas a siete días— en `app/lib/horarios.ts`. Entre las dos, el
+modelo de almacenamiento no se asoma nunca a la pantalla.
+
+**Las palabras importan tanto como el código.** En la interfaz no aparece
+"bloque" en ningún lado: los tramos 2 y 3 se llaman *"Segundo horario ·
+opcional"*, con la palabra opcional en la propia etiqueta y no solo en la
+letra chica. Y la explicación de arriba está escrita en el lenguaje en que
+el dueño tiene el problema: *"El segundo horario es para cuando cierras a
+media jornada. Por ejemplo un sábado: abres de 9:00 a 14:00, cierras a
+comer, y vuelves de 16:00 a 20:00."*
+
+### Tres ranuras fijas, y por qué no un "Agregar horario"
+
+Un botón que añade y quita filas en vivo necesita JavaScript de cliente, y
+el proyecto lleva **cero `"use client"`** a propósito. Con tres ranuras
+fijas: agregar un tramo es llenar sus dos horas, y quitarlo es vaciarlas.
+
+El costo es que la pantalla enseña tres tramos aunque casi todos los días
+usen uno. Se acepta ese costo **a cambio de que el texto haga el trabajo**
+que en otra app haría un botón: si las ranuras vacías se explican bien,
+dejan de ser ruido. Tres cubre de sobra cualquier barbería real.
+
+`MAX_BLOQUES` vive en `lib/horarios.ts` y la pantalla **genera** sus tramos
+a partir de esa constante en vez de escribirlos a mano. Si la pantalla y el
+Server Action contaran distinto, el tramo sobrante se pintaría pero no se
+guardaría — un fallo silencioso.
+
+### El par de horas a medias es error; el par vacío no
+
+Un tramo con las dos horas vacías significa "no aplica" y se ignora. Un
+tramo con **una sola** hora se rechaza, porque casi siempre es un descuido:
+adivinar cuál falta sería inventar horario del negocio.
+
+Reglas que valida el action, todas del lado del servidor —un Server Action
+es un endpoint público, y que el `<input type="time">` ya filtre en el
+navegador no cuenta—:
+
+- formato `HH:MM` (regex; los segundos son opcionales por si algún
+  navegador los manda);
+- cerrar después de abrir, que es además el `CHECK` de la tabla;
+- los tramos del día no se encima uno con otro — **aquí se cumple lo que
+  la entrada de horarios dejó pendiente**: se decidió no pagar la extensión
+  `btree_gist` para un `EXCLUDE`, con el argumento de que el formulario lo
+  validaría. Éste es ese formulario;
+- un día abierto necesita al menos un tramo.
+
+Dos tramos **pegados** (uno cierra 14:00 y el otro abre 14:00) se permiten:
+no se encima nada, es un horario corrido escrito en dos renglones.
+
+### Guardar es borrar el día e insertarlo de nuevo
+
+Para una tabla de configuración de ocho filas es lo más simple, y esquiva
+los conflictos con el `unique (dia_semana, hora_inicio)` que tendría un
+update fila por fila. Los `id` y `created_at` de ese día cambian en cada
+guardado; nada depende de ellos.
+
+**El delete y el insert van en una función de Postgres**, no como dos
+llamadas desde TypeScript: `guardar_dia`, en
+`docs/sql/10-guardar-dia.sql`. El cuerpo de una función es una sola
+transacción, así que un insert rechazado revierte el borrado con él.
+
+Esto **se hizo en un segundo paso, corrigiendo la decisión anterior.** Al
+principio se aceptó el trade-off: dos llamadas con un viaje de red en
+medio, y si la segunda fallaba el día quedaba sin filas —cerrado, sin que
+el dueño lo pidiera—, mitigado con un mensaje de error que lo dijera. El
+argumento que lo revirtió no fue de probabilidad sino **de qué se pierde
+cuando pasa**: el día que se apaga solo puede ser el sábado, que es el más
+fuerte de la semana, y el dueño se enteraría por los clientes que no
+pudieron agendar. Diez líneas de SQL cuestan menos que ese día.
+
+Vale la pena registrar la forma del error, porque se repite: el cálculo
+"esto casi nunca pasa" era correcto, y aun así la decisión estaba mal. La
+frecuencia era baja pero el costo del caso malo era alto y silencioso, y en
+esa combinación el promedio no es la medida a usar.
+
+**Lo que la función NO valida, a propósito**: el formato de las horas, los
+tramos a medias, el rango y el solapamiento se quedan en
+`app/actions/horarios.ts`. Duplicar esa lógica en SQL es tener dos
+versiones que con el tiempo dejan de coincidir. Lo que sí sigue
+protegiendo la base son sus propios constraints — y ahora protegen mejor,
+porque al estar dentro de la transacción un rechazo revierte también el
+borrado.
+
+**⚠️ Permisos, al revés que en `bloques_del_dia`.** Postgres le da
+`execute` a `public` a toda función recién creada. En `bloques_del_dia` eso
+era inofensivo —solo lee horarios, que ya salen en la landing— y hasta se
+le dio permiso a `anon` a propósito. Ésta **escribe**: dejar el permiso por
+omisión le daría a `anon` un endpoint para reescribir los horarios del
+negocio, y la anon key viaja en el bundle del navegador. El script revoca
+`execute` de `public`, `anon` y `authenticated`, y se lo concede solo a
+`service_role`. Es una puerta trasera a `horarios_semana` que anularía su
+política de solo-lectura, y el script trae una comprobación con
+`has_function_privilege` para verificarlo.
+
+**Un caso de error que sí se distingue**: si PostgREST devuelve `PGRST202`
+—no encuentra la función—, casi siempre es que se desplegó el código sin
+haber corrido el SQL. Tiene su propio mensaje, porque el genérico mandaría
+a buscar el problema muy lejos de donde está. Y el mensaje genérico ahora
+puede prometer que el horario quedó intacto, cosa que antes habría sido
+mentira.
+
+### Cerrar un día no borra sus horas
+
+Se respeta la convención original: cerrar guarda las filas con
+`activo = false`. Volver a abrir el lunes no obliga a reescribir su
+horario. El único caso en que un día se queda sin filas es si se cierra
+*y* se vacían las horas, que también funciona: cero filas es un día
+cerrado tanto para `bloques_del_dia` como para la landing.
+
+### Citas que quedan fuera del horario nuevo
+
+**No se hizo nada, porque ya estaba resuelto.** `getAgendaDelDia` detecta
+las citas cuyo inicio no cae en ningún bloque activo y las muestra en la
+sección "Fuera del horario". Cambiar el horario nunca cancela una cita. La
+pantalla lo dice explícitamente, para que el dueño no tenga que descubrirlo.
+
+### `DIAS` se sacó de `Schedule.tsx` a `lib/horarios.ts`
+
+El orden de los días —lunes primero, domingo al final— y sus nombres los
+necesitan idénticos la landing y el editor. Dos copias que se separaran
+dejarían las dos pantallas discrepando sobre la misma semana.
+
+`Schedule.tsx` **conserva su propia consulta** en vez de usar `getSemana()`.
+No es descuido: la landing filtra bloque por bloque por `activo`, mientras
+que el panel razona con un `abierto` por día. Unificarlos cambiaría lo que
+la landing muestra en el caso de un día con filas mezcladas. Se comparte lo
+que de verdad es lo mismo —el orden, los nombres, el recorte de la hora— y
+no más.
+
+### El bug de domingo que no llegó a existir
+
+El acuse de recibo viaja como `?ok=<dia>`, y el domingo es el **0**.
+`Number("0") || null` da `null`, porque 0 es falsy en JavaScript: el
+"guardado" habría aparecido en todos los días menos en domingo. Se compara
+como texto. Queda escrito porque el mismo `|| null` sí es correcto en
+`/admin/servicios`, donde los id empiezan en 1 — la diferencia es que aquí
+el cero es un valor legítimo.
