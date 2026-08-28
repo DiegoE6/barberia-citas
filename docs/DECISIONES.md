@@ -949,3 +949,197 @@ El acuse de recibo viaja como `?ok=<dia>`, y el domingo es el **0**.
 como texto. Queda escrito porque el mismo `|| null` sí es correcto en
 `/admin/servicios`, donde los id empiezan en 1 — la diferencia es que aquí
 el cero es un valor legítimo.
+
+## Freno anti-spam: tres capas y fallo abierto (2026-08-28)
+
+**Contexto**: cierra el TODO que dejó abierto a propósito la entrada
+"Acceso a citas: Server Action con service_role". Aquella decisión eligió
+el Server Action precisamente porque era la única de las dos opciones que
+dejaba **un lugar donde poner el freno**. Éste es el freno.
+
+Hasta hoy, `agendarCita` es un endpoint público sin autenticación: un
+script podía llenar la agenda entera con citas falsas. La verificación
+CSRF de Next (comparar `Origin` contra `Host`) no ayuda, porque no
+detiene un `curl` con el `Origin` correcto.
+
+### El costo de equivocarse no es simétrico
+
+Es la premisa de la que sale todo lo demás, y va escrita antes que las
+opciones porque decide entre ellas:
+
+| Error | Costo | Cómo se repara |
+|---|---|---|
+| Dejar pasar una cita falsa | Un hueco en la agenda | El dueño la cancela desde el panel, un clic |
+| Bloquear a un cliente real | La venta, y la impresión | **No se repara**: esa persona no vuelve a intentar |
+
+De ahí las dos reglas que sigue todo el código de `app/lib/limites.ts`:
+
+1. **Fallar abierto.** Si la consulta del límite se cae, si falta el header
+   de la IP, si no se corrió el SQL — se **permite** la cita y se deja
+   rastro en los logs. Nunca se pierde una reserva por un error de nuestra
+   propia infraestructura.
+2. **Nunca un callejón sin salida.** Todo bloqueo ofrece WhatsApp.
+
+### Contra qué se está defendiendo, realmente
+
+Las cuatro opciones del TODO no atacan al mismo enemigo, así que primero
+había que nombrarlos:
+
+| Escenario | Frecuencia | Daño |
+|---|---|---|
+| A. Cliente real que envía dos veces, o agenda para sus hijos | **Alta** | Bajo pero constante |
+| B. Bromista o competencia con un script | Baja | **Alto**: un sábado entero |
+| C. Bot genérico que rellena cualquier formulario | Baja aquí | Bajo |
+| D. Atacante que rota IPs y teléfonos | Muy baja | Alto |
+
+**D no se detiene sin SMS.** A, B y C sí, y gratis.
+
+### Opciones consideradas
+
+- **Campo trampa (honeypot).** Cuesta cero y atrapa C. Pero detiene **muy
+  poco de lo que importa**: el script del escenario B hace POST directo al
+  Server Action, nunca renderiza el HTML, así que no ve el campo, no lo
+  manda y pasa la prueba. Se incluye por lo que cuesta, no por lo que
+  protege.
+- **Ticket firmado en el formulario** (timestamp + HMAC con `node:crypto`,
+  sin dependencias) que obligue a hacer el GET antes del POST y rechace
+  envíos de menos de tres segundos. Es la versión seria del honeypot y sí
+  cerraría el hueco anterior. **Descartada por ahora**: cubre lo mismo que
+  el límite por IP con una pieza más. Queda anotada por si el límite por
+  IP resulta insuficiente.
+- **Límite por teléfono.** Barato. Débil contra quien inventa teléfonos,
+  pero es la **única** capa que ataca el escenario A, que es el más
+  frecuente de todos.
+- **Límite por IP.** Es el que hace el trabajo pesado (B) y también el
+  único con riesgo serio de falso positivo.
+- **Captcha.** Descartado. Incluso uno gratis es un servicio externo y
+  **rompe la invariante de cero `"use client"`** que fijó "Flujo de reserva
+  en tres pasos": convierte un flujo que hoy funciona en HTML plano en uno
+  que depende de JavaScript de terceros. Un cliente con JS bloqueado o mala
+  conexión pierde la cita. Choca de frente con la premisa de arriba.
+- **Verificación por SMS.** Descartada por costo. Es lo único que arregla
+  de verdad el "los teléfonos se inventan", porque convierte un teléfono
+  falso en un costo para el atacante, pero cuesta dinero por mensaje y le
+  mete fricción a **cada** reserva legítima, no solo a las malas.
+
+**El orden por costo y el orden por efecto no coinciden.** Por costo:
+honeypot < teléfono < IP < captcha/SMS. Por lo que de verdad detienen
+aquí: **IP > teléfono > SMS (fuera de alcance) > honeypot**.
+
+### Decisión: tres capas, de fuera hacia adentro
+
+```
+POST  →  campo trampa + validación de forma   (sin tocar la BD)
+      →  límite por IP                         (1 viaje)
+      →  buscar servicio + revalidar el slot   (lo que ya existía)
+      →  límite por teléfono                   (1 viaje)
+      →  INSERT
+```
+
+El límite por IP va **antes** del cálculo de disponibilidad a propósito:
+es una sola consulta y protege los tres viajes caros que vienen después.
+El de teléfono va pegado al insert, porque su mensaje le habla al cliente
+de *sus* citas y conviene que a esas alturas ya sepamos que todo lo demás
+estaba bien.
+
+### Dónde vive el estado del rate limit
+
+El instinto es un `Map` a nivel de módulo. **En Vercel no funciona**, por
+tres razones que se suman: cada petición puede caer en una instancia fría
+donde el contador nace en cero; varias instancias corren en paralelo, así
+que diez peticiones simultáneas pueden tocar diez contadores distintos; y
+las instancias se congelan y reciclan sin aviso. Atraparía, con suerte,
+una ráfaga que caiga toda en la misma instancia caliente.
+
+La respuesta tiene dos mitades, y **la primera es gratis**:
+
+- **Límite por teléfono → el estado ya existe, es la tabla `citas`.** La
+  pregunta "¿cuántos horarios tiene apartados este teléfono?" es un
+  `count` sobre `citas`. Contar la realidad en vez de llevar un contador
+  aparte tiene dos ventajas que un contador no puede dar: no se puede
+  desincronizar, y **se auto-repara** — en cuanto el dueño confirma o
+  cancela desde el panel, el cliente recupera su cupo. Como limita
+  horarios *apartados* y no reservas históricas, el cliente que viene cada
+  semana nunca se topa con él.
+
+  Hizo falta una pieza: la columna generada `telefono_norm`
+  (`11-telefono-normalizado.sql`). Sin normalizar, el límite se salta solo
+  escribiendo "81 1234 5678" una vez y "8112345678" la siguiente.
+
+- **Límite por IP → tabla `limite_citas` en Postgres**
+  (`12-limite-citas.sql`), porque un intento **rechazado** no deja fila en
+  `citas` y no hay nada que contar. Una fila por IP, no una por intento.
+
+  El conteo se hace en una **función** de Postgres, no leyendo y
+  escribiendo desde TypeScript. Es el mismo argumento de `guardar_dia`:
+  serían dos viajes con un hueco en medio, y en ese hueco veinte
+  peticiones en paralelo leen todas "0 intentos" y pasan todas. Y ese caso
+  no es teórico — peticiones en paralelo es *exactamente* lo que hace el
+  script del escenario B. Sin atomicidad, esta capa no serviría para nada.
+
+### Los umbrales, y por qué ésos
+
+| Límite | Valor | Razón |
+|---|---|---|
+| Citas pendientes por teléfono | **3** | No 1 ni 2: un papá agendando para él y dos hijos con su propio número es un caso real en una barbería. Con 3 pasa; con 2 se pierde la venta. |
+| Reservas por IP por hora | **5** | Mucha gente comparte IP: el WiFi del local, una oficina, y sobre todo el CGNAT de las operadoras móviles, donde un barrio entero sale por la misma dirección. Un hogar no llega a 5 en una hora; un script que quiere llenar un sábado (~16 horarios) se frena en la sexta. |
+
+Viven como constantes exportadas en `app/lib/limites.ts` para que subirlos
+sea editar un número. `MAX_CITAS_PENDIENTES` además se **importa** en el
+mensaje de error, para que subir el umbral no deje el texto mintiendo.
+
+### Qué se le dice al cliente que choca con el límite
+
+Ningún mensaje dice "spam", "bot" ni "bloqueado": acusar a un cliente real
+es peor que la cita falsa que se estaba evitando. Cada uno dice qué pasó,
+qué hacer ahora, y ofrece WhatsApp.
+
+| `?error=` | Mensaje |
+|---|---|
+| `limite_telefono` | "Ya tienes 3 citas apartadas con este número. Si necesitas otra más, escríbenos y te la agendamos." |
+| `limite_ip` | "Recibimos varias reservas desde esta conexión hace un momento. Espera unos minutos e inténtalo de nuevo, o escríbenos y te la agendamos." |
+| honeypot | Reusa `datos`. El bot no necesita saber, y el humano que lo dispare por accidente cae en un mensaje que igual le deja salida. |
+
+Los dos devuelven a `/agendar/confirmar` y **no** a `/agendar`: el cliente
+conserva servicio, fecha y hora, y solo reescribe nombre y teléfono — que
+los reescribe de todos modos, porque por la decisión de privacidad de
+"Flujo de reserva en tres pasos" esos dos campos nunca viajan en la URL.
+
+El mensaje del teléfono es **informativo y verdadero**: si de verdad
+tienes tres citas apartadas, te lo explica y no te desconcierta. El de la
+IP es el peligroso, y por eso lleva el umbral holgado.
+
+### El riesgo real del honeypot no es el bot
+
+Es que el **autocompletar del navegador** llene el campo oculto y mate una
+reserva legítima. De ahí las cuatro precauciones: un nombre que no
+corresponde a ninguna categoría autocompletable (`referencia`, nada de
+nombre/email/tel), `autoComplete="off"`, `tabIndex={-1}` para sacarlo del
+recorrido con Tab, y `aria-hidden` para los lectores de pantalla. Se
+oculta fuera de pantalla y no con `display:none` porque varios bots saltan
+justamente lo que está oculto así.
+
+### Lo que se cede
+
+- **Un cliente legítimo puede toparse con un límite.** Se acepta, mitigado
+  por umbrales holgados, mensajes que no acusan y la salida por WhatsApp.
+- **La salida por WhatsApp hoy termina en el Table Editor de Supabase**,
+  porque el dueño no puede crear una cita desde el panel. Queda anotado en
+  PLAN.md como consecuencia directa de esta decisión.
+- **El límite por IP se salta con datos móviles**, cambiando de red. No es
+  gratis para el atacante y no vale la pena perseguirlo aquí.
+
+### Lo que esta decisión NO resuelve
+
+- **El escenario D.** Quien rote IPs y teléfonos pasa. Eso es SMS.
+- **Una sola cita falsa con un teléfono inventado.** Ninguna capa la
+  detiene, y no debería: es indistinguible de un cliente real. Se cancela
+  desde el panel.
+- **Reservas legítimas que no se presentan.** Problema distinto; se ataca
+  con un recordatorio, no con rate limiting.
+
+**Criterio para escalar, escrito de antemano** para no decidirlo en
+caliente: si aparecen diez o más citas falsas en una semana, o si los logs
+muestran que el límite por IP está frenando a personas reales, entra la
+verificación por SMS. No el captcha — ése ya está descartado por la
+invariante de cero JavaScript de cliente.
