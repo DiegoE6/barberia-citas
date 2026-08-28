@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { supabase } from "@/app/lib/supabase";
 import { supabaseAdmin } from "@/app/lib/supabase-admin";
 import { getDisponibilidad } from "@/app/lib/disponibilidad";
+import { limitePorTelefono, registrarIntentoPorIp } from "@/app/lib/limites";
 
 /**
  * Server Action que agenda una cita.
@@ -19,6 +20,14 @@ import { getDisponibilidad } from "@/app/lib/disponibilidad";
  *   - `fin` y `precio_cobrado` no se reciben: se derivan del servicio.
  *   - El horario elegido se vuelve a validar contra la disponibilidad real,
  *     porque la lista que vio el cliente pudo quedar vieja o ser inventada.
+ *
+ * ── El freno anti-spam ──────────────────────────────────────────────────
+ * Este endpoint es público y no pide autenticación, así que sin freno un
+ * script puede llenar la agenda entera con citas falsas. Hay tres capas, de
+ * fuera hacia adentro: campo trampa, límite por IP y límite por teléfono.
+ * Cada una está comentada en su lugar; el razonamiento completo —incluido
+ * por qué no hay captcha— está en docs/DECISIONES.md → "Freno anti-spam:
+ * tres capas y fallo abierto".
  */
 
 const MINUTE_MS = 60 * 1000;
@@ -30,6 +39,11 @@ export async function agendarCita(formData: FormData) {
   const nombre = String(formData.get("nombre") ?? "").trim();
   const telefono = String(formData.get("telefono") ?? "").trim();
 
+  // Campo trampa: existe en el HTML pero está fuera de la pantalla y ningún
+  // cliente real lo ve. Ver el comentario del formulario en
+  // app/(public)/agendar/confirmar/page.tsx.
+  const trampa = String(formData.get("referencia") ?? "").trim();
+
   // Los valores vienen del FormData, o sea de fuera: se escapan antes de
   // meterlos en una URL, aunque después se validen.
   const q = (valor: string | number) => encodeURIComponent(String(valor));
@@ -40,27 +54,40 @@ export async function agendarCita(formData: FormData) {
   const volverASlots = (error: string) =>
     `/agendar?servicio=${q(servicioId)}&fecha=${q(fecha)}&error=${error}`;
 
-  // ───────────────────────────────────────────────────────────────────────
-  // TODO(anti-spam): el freno va AQUÍ, antes de tocar la base de datos.
+  // ── Capa 1: campo trampa ──────────────────────────────────────────────
+  // Cuesta cero y atrapa al bot que rellena a ciegas cualquier formulario
+  // que encuentra.
   //
-  // Hoy no hay nada que impida a un script llenar la agenda entera con citas
-  // falsas: este endpoint es público y no requiere autenticación.
+  // Es la capa MÁS DÉBIL de las tres, y conviene no confundirse sobre lo que
+  // hace: un script que hace POST directo aquí nunca renderiza el HTML, así
+  // que no ve este campo, no lo manda, y pasa la prueba. Quien detiene ese
+  // caso es la capa 2. Ésta se queda por lo que cuesta, no por lo que
+  // protege.
   //
-  // Opciones, de menor a mayor costo:
-  //   1. Campo trampa (honeypot) oculto en el formulario: si viene lleno, es
-  //      un bot. Gratis, detiene lo más burdo.
-  //   2. Límite de N citas pendientes por teléfono al día. Barato, pero débil:
-  //      los teléfonos se inventan.
-  //   3. Límite por IP. Requiere leer headers y guardar contadores.
-  //   4. Captcha, o verificación por SMS. Efectivo y con costo real.
-  //
-  // Ver docs/DECISIONES.md → "Acceso a citas: Server Action con service_role".
-  // ───────────────────────────────────────────────────────────────────────
+  // Se reusa el error "datos" a propósito: no hace falta un mensaje propio,
+  // y el que hay igual deja salida a un humano que lo dispare por accidente.
+  if (trampa) {
+    redirect(volverAConfirmar("datos"));
+  }
 
-  // 1. Validación de forma. El `required` del HTML ya filtra al usuario
-  //    normal; esto es para quien no pase por el formulario.
+  // ── Capa 0: validación de forma ───────────────────────────────────────
+  // El `required` del HTML ya filtra al usuario normal; esto es para quien
+  // no pase por el formulario.
   if (!servicioId || !fecha || !hora || !nombre || !telefono) {
     redirect(volverAConfirmar("datos"));
+  }
+
+  // ── Capa 2: límite por IP ─────────────────────────────────────────────
+  // Va ANTES de buscar el servicio y de recalcular la disponibilidad, que
+  // son tres viajes a la base de datos: es una sola consulta y protege todo
+  // el trabajo caro que viene después.
+  //
+  // Ésta es la capa que de verdad detiene un script llenando la agenda, y
+  // también la única con riesgo real de falso positivo, porque hay gente
+  // que comparte IP. Por eso el umbral va holgado y el mensaje ofrece
+  // WhatsApp. Si la consulta falla, deja pasar: ver app/lib/limites.ts.
+  if ((await registrarIntentoPorIp()) === "limite") {
+    redirect(volverAConfirmar("limite_ip"));
   }
 
   // 2. El servicio tiene que existir y estar activo. Se usa el cliente
@@ -94,6 +121,19 @@ export async function agendarCita(formData: FormData) {
     redirect(volverASlots("ocupado"));
   }
 
+  // ── Capa 3: límite por teléfono ───────────────────────────────────────
+  // Va al final, pegado al insert, porque es la más cara de las tres en
+  // términos de falso positivo: el mensaje que produce le habla al cliente
+  // de SUS citas, así que conviene que a estas alturas ya sepamos que todo
+  // lo demás estaba bien.
+  //
+  // Es débil contra quien inventa teléfonos —eso solo lo arregla la
+  // verificación por SMS—, pero es la única capa que ataca el caso más
+  // frecuente de todos: el cliente real que envía dos veces.
+  if ((await limitePorTelefono(telefono)) === "limite") {
+    redirect(volverAConfirmar("limite_telefono"));
+  }
+
   // 4. `fin` y `precio_cobrado` los calcula el servidor, nunca el cliente.
   //    El instante de inicio sale del propio slot, que ya viene convertido
   //    desde Postgres: no se vuelve a interpretar ninguna hora en JavaScript.
@@ -101,6 +141,8 @@ export async function agendarCita(formData: FormData) {
   const fin = new Date(inicio.getTime() + servicio.duracion_minutos * MINUTE_MS);
 
   // `estado` se deja en el default de la tabla ('pendiente').
+  // `telefono_norm` tampoco se manda: es una columna generada y la calcula
+  // Postgres (docs/sql/11-telefono-normalizado.sql).
   const { error } = await supabaseAdmin.from("citas").insert({
     servicio_id: servicio.id,
     nombre_cliente: nombre,

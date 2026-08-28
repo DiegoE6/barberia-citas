@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { supabase } from "@/app/lib/supabase";
+import { whatsappUrl } from "@/app/data";
 import { agendarCita } from "@/app/actions/citas";
+import { MAX_CITAS_PENDIENTES } from "@/app/lib/limites";
 import { getDisponibilidad, formatFechaLarga } from "@/app/lib/disponibilidad";
 
 // Paso 2 del flujo: confirmar la selección y dejar los datos de contacto.
@@ -9,9 +11,35 @@ import { getDisponibilidad, formatFechaLarga } from "@/app/lib/disponibilidad";
 // agendando: el resumen sale de la URL, no de ningún desplegable que se
 // pueda haber cambiado sin enviar.
 
-const MENSAJES_ERROR: Record<string, string> = {
-  datos: "Faltan datos. Revisa tu nombre y teléfono.",
-  desconocido: "No pudimos completar la reserva. Intenta de nuevo.",
+/**
+ * Los mensajes de los frenos anti-spam llevan `whatsapp: true`.
+ *
+ * Es la regla, no un adorno: un cliente real que choca con un límite no
+ * puede quedarse sin salida, porque eso es una cita perdida. Ninguno de los
+ * textos dice "spam", "bot" ni "bloqueado" — acusar a un cliente de verdad
+ * es peor que la cita falsa que se estaba evitando.
+ *
+ * El número del límite se importa de app/lib/limites.ts en vez de escribirse
+ * aquí, para que subir el umbral no deje el mensaje mintiendo.
+ */
+const MENSAJES_ERROR: Record<string, { texto: string; whatsapp: boolean }> = {
+  datos: {
+    texto: "Faltan datos. Revisa tu nombre y teléfono.",
+    whatsapp: false,
+  },
+  desconocido: {
+    texto: "No pudimos completar la reserva. Intenta de nuevo.",
+    whatsapp: true,
+  },
+  limite_telefono: {
+    texto: `Ya tienes ${MAX_CITAS_PENDIENTES} citas apartadas con este número. Si necesitas otra más, escríbenos y te la agendamos.`,
+    whatsapp: true,
+  },
+  limite_ip: {
+    texto:
+      "Recibimos varias reservas desde esta conexión hace un momento. Espera unos minutos e inténtalo de nuevo, o escríbenos y te la agendamos.",
+    whatsapp: true,
+  },
 };
 
 export default async function ConfirmarPage({
@@ -74,9 +102,19 @@ export default async function ConfirmarPage({
         </h1>
 
         {mensajeError && (
-          <p className="mt-6 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-center text-amber-900">
-            {mensajeError}
-          </p>
+          <div className="mt-6 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-center text-amber-900">
+            <p>{mensajeError.texto}</p>
+            {mensajeError.whatsapp && (
+              <a
+                href={whatsappUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-2 inline-block font-semibold underline"
+              >
+                Escríbenos por WhatsApp
+              </a>
+            )}
+          </div>
         )}
 
         <dl className="mt-10 flex flex-col divide-y divide-zinc-200 border-y border-zinc-200">
@@ -109,6 +147,39 @@ export default async function ConfirmarPage({
           <input type="hidden" name="servicio" value={servicio.id} />
           <input type="hidden" name="fecha" value={fecha} />
           <input type="hidden" name="hora" value={hora} />
+
+          {/* Campo trampa (honeypot). Un bot que rellena todo lo que
+              encuentra lo llena; una persona no lo ve. Si llega con algo,
+              app/actions/citas.ts rechaza la reserva.
+
+              El riesgo real de este campo NO es el bot: es que el
+              autocompletar del navegador lo llene solo y mate una reserva
+              legítima. De ahí las cuatro precauciones:
+
+                - "referencia" no corresponde a ninguna categoría que los
+                  navegadores autocompleten (nada de nombre, email o tel).
+                - autoComplete="off" se lo pide explícitamente.
+                - tabIndex={-1} lo saca del recorrido con Tab, para que
+                  nadie caiga aquí navegando con el teclado.
+                - aria-hidden lo esconde de los lectores de pantalla.
+
+              Se oculta sacándolo de la pantalla y no con display:none,
+              porque varios bots saltan justamente lo que está oculto así.
+              Al ser absolute no ocupa lugar en el flex de arriba. */}
+          <div
+            aria-hidden="true"
+            className="absolute -left-[9999px] h-0 w-0 overflow-hidden"
+          >
+            <label htmlFor="referencia">No llenes este campo</label>
+            <input
+              type="text"
+              id="referencia"
+              name="referencia"
+              tabIndex={-1}
+              autoComplete="off"
+              defaultValue=""
+            />
+          </div>
 
           <label className="flex flex-col gap-1">
             <span className="text-sm font-medium">Nombre</span>

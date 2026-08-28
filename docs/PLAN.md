@@ -28,6 +28,11 @@
 - [ ] Crear servicios nuevos y reordenarlos
 - [ ] Tabla `excepciones` (cerrar un día concreto: festivos, vacaciones) y
       filtrarla en el cálculo de slots
-- [ ] Freno anti-spam en el Server Action de citas (TODO en app/actions/citas.ts)
+- [ ] Freno anti-spam en el Server Action de citas: campo trampa, límite por
+      IP y límite por teléfono. Falta correr docs/sql/11 y 12 en Supabase y
+      verificar en producción (ver docs/DECISIONES.md)
+- [ ] Crear cita desde el panel. Sale del freno anti-spam: al cliente que
+      choca con un límite se le manda a WhatsApp, y hoy la única forma de
+      agendarlo es meter la fila a mano en el Table Editor de Supabase
 - [x] Migrar la landing de `revalidate = 300` a `revalidatePath('/')` al guardar
       (ver primera entrada de docs/DECISIONES.md)
